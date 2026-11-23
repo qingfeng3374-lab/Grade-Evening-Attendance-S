@@ -91,7 +91,7 @@ export function build(ctx) {
           ["定位精度", Math.round(coords.accuracy) + " 米"]]);
       }
       content += '<h3>你现在是否在校？</h3><div class="choice-grid">'
-        + '<button type="button" class="choice" data-do="locate"><span class="icon pin" aria-hidden="true"></span><span><strong>是，我在校</strong><small>获取定位并校验</small></span></button>'
+        + '<button type="button" class="choice" data-do="locate"><span class="icon pin" aria-hidden="true"></span><span><strong>是，我在校</strong><small>允许定位后自动校验</small></span></button>'
         + '<button type="button" class="choice" data-do="away"><span class="icon memo" aria-hidden="true"></span><span><strong>否，我不在校</strong><small>填写离校原因</small></span></button></div>';
       if (ctx.demo) content += '<div class="actions">' + button("模拟校内", "simulate-pass", "quiet compact")
         + button("模拟校外", "simulate-outside", "quiet compact") + '</div>';
@@ -131,16 +131,24 @@ export function build(ctx) {
       openTask(id, "定位需要在支持定位的浏览器中使用 HTTPS 网址。");
       return;
     }
-    ctx.show(task.title, note("正在定位，请在浏览器提示中允许访问位置。"));
+    // Request location in the click handler so browsers can show their permission prompt.
+    const request = new Promise((resolve, reject) =>
+      navigator.geolocation.getCurrentPosition(resolve, reject, {enableHighAccuracy: true, maximumAge: 0, timeout: 15000}));
+    ctx.show(task.title, '<div role="status">' + note("正在获取位置。如果浏览器询问是否允许定位，请点「允许」，系统会自动继续打卡。") + '</div>');
     const waiting = ctx.dialog.querySelector(".note");
     try {
-      const position = await new Promise((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, {enableHighAccuracy: true, maximumAge: 0, timeout: 15000}));
+      const position = await request;
       if (ctx.dialog.open && waiting.isConnected) await check(id, position.coords);
     } catch (error) {
-      if (ctx.dialog.open && waiting.isConnected) openTask(id, ({1: "位置权限未开启，请在浏览器和系统设置中允许定位后重试。",
-        2: "暂时无法取得位置，请确认手机定位已开启，移至开阔处重试。", 3: "定位超时，请移至开阔处再试。"})[error.code]
-        ?? error.message ?? "无法获取位置，请重试。");
+      let message = ({2: "暂时无法取得位置，请确认手机定位已开启，移至开阔处重试。",
+        3: "定位超时，请移至开阔处再试。"})[error.code] ?? error.message ?? "无法获取位置，请重试。";
+      if (error.code === 1 && ctx.dialog.open && waiting.isConnected) {
+        const permission = await navigator.permissions?.query({name: "geolocation"}).catch(() => null);
+        message = permission?.state === "prompt"
+          ? "尚未允许定位。请再点「是，我在校」，并在浏览器提示中点「允许」。"
+          : "请在浏览器的站点权限中允许访问位置，并确认手机已开启定位且允许浏览器使用位置，再点「是，我在校」。";
+      }
+      if (ctx.dialog.open && waiting.isConnected) openTask(id, message);
     }
   }
 

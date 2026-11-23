@@ -8,7 +8,7 @@ const fileInput = document.querySelector("#files");
 const live = document.querySelector("#live");
 const role = document.body.dataset.role;
 const demo = new URLSearchParams(location.search).get("demo") === "1";
-const routes = {student: "./student.mjs?v=5", leader: "./leader.mjs?v=5", admin: "./admin.mjs?v=5"};
+const routes = {student: "./student.mjs?v=6", leader: "./leader.mjs?v=5", admin: "./admin.mjs?v=5"};
 const ui = {};
 let storage;
 let workspace;
