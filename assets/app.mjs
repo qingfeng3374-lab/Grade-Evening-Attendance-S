@@ -8,7 +8,7 @@ const fileInput = document.querySelector("#files");
 const live = document.querySelector("#live");
 const role = document.body.dataset.role;
 const demo = new URLSearchParams(location.search).get("demo") === "1";
-const routes = {student: "./student.mjs", leader: "./leader.mjs?v=2", admin: "./admin.mjs?v=2"};
+const routes = {student: "./student.mjs", leader: "./leader.mjs?v=2", admin: "./admin.mjs?v=4"};
 const ui = {};
 let storage;
 let workspace;
@@ -240,7 +240,7 @@ async function init() {
     auth.onOtherSignOut(session.token, leave);
   }
   workspace = await storage.read();
-  screen = (await import(routes[role])).build(ctx);
+  screen = await (await import(routes[role])).build(ctx);
   document.querySelector(".nav").hidden = false;
   draw();
   const footer = document.querySelector(".footer-inner");

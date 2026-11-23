@@ -4,8 +4,24 @@ import {campusNames, validateFence} from "./geo.mjs";
 import {area, button, checklist, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys,
   completionBar, distribution, select, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=2";
 
-export function build(ctx) {
+const [tangdaowan, ...customCampuses] = campusNames;
+const boundaryPath = "./assets/tangdaowan-boundary.geojson";
+
+async function loadDefaultFence() {
+  try {
+    const response = await fetch(boundaryPath);
+    if (!response.ok) return null;
+    const feature = await response.json();
+    return validateFence({name: tangdaowan, version: feature.properties.version,
+      buffer: 20, maxAccuracy: 70, geometry: feature});
+  } catch {
+    return null;
+  }
+}
+
+export async function build(ctx) {
   const ui = ctx.ui;
+  const presetFence = await loadDefaultFence();
   let listPreview;
   let reportFiles = [];
   let detailGroup;
@@ -13,6 +29,8 @@ export function build(ctx) {
 
   const groups = () => [...new Set(ctx.state.roster.map(person => person.group))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const taskFor = id => need(ctx.state.tasks.find(task => task.id === id), "找不到任务。");
+  const customFences = () => ctx.state.fences.filter(item => customCampuses.includes(item.name));
+  const availableFences = () => presetFence ? [presetFence, ...customFences()] : customFences();
 
   function classData(task, state = ctx.state) {
     const byGroup = new Map(state.reports.filter(item => item.report.taskId === task.id).map(item => [item.report.group, item]));
@@ -91,18 +109,21 @@ export function build(ctx) {
       + (ctx.state.staff.length && missing.length ? '<p class="tiny">待核对负责人 ' + escape(missing.join("、")) + '</p>' : "")
       + '<div class="actions">' + button("导入学籍 CSV", "students", "secondary") + button("导入负责人 CSV", "staff", "secondary") + '</div>'
       + '<p class="tiny">CSV 需含姓名、班级和学号，以 UTF-8 保存。</p>';
-    const fences = ctx.state.fences.length
-      ? '<div class="rows">' + ctx.state.fences.map(item => '<div class="list-row"><div><strong>' + escape(item.name)
+    const fences = (presetFence ? '<div class="rows"><div class="list-row"><div><strong>' + escape(presetFence.name)
+        + '</strong><p class="tiny">边界外延 ' + presetFence.buffer + ' 米 · 误差上限 ' + presetFence.maxAccuracy + ' 米</p></div>'
+        + tag("系统预设") + '</div></div><p class="tiny"><a href="' + boundaryPath
+        + '" download="唐岛湾校区边界.geojson">下载边界文件</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap contributors（ODbL）</a></p>'
+      : note("唐岛湾校区预设围栏暂未加载，请刷新后重试。", true))
+      + '<div class="rows">' + customFences().map(item => '<div class="list-row"><div><strong>' + escape(item.name)
         + '</strong><p class="tiny">周边 ' + item.buffer + ' 米 · 误差上限 ' + item.maxAccuracy + ' 米</p></div>'
-        + button("编辑", "fence", "quiet compact", item.name) + '</div>').join("") + '</div>'
-      : '<p class="meta">发布前请导入经核实的校园范围。</p>';
+        + button("编辑", "fence", "quiet compact", item.name) + '</div>').join("") + '</div>';
     const aside = inbox() + panel("名单维护", roster) + panel("打卡范围", fences + '<div class="actions">'
-      + button("配置校区围栏", "fence", "secondary") + '</div>');
+      + button("配置其他校区围栏", "fence", "secondary") + '</div>');
     const cards = tasks.length ? '<div class="mobile-task-switch">' + select("task-switch", "切换任务", tasks.map(item => [item.id, item.title]), task.id)
       + '</div><div class="task-list desktop-task-list">' + tasks.map(item => taskCard(item, item.current,
       button(task?.id === item.id ? "当前查看" : "详情", "task", "secondary", item.id), task?.id === item.id,
       item.mode === "draft" ? "" : item.groups.length + " 个班级 · 版本 " + item.revision)).join("") + '</div>'
-      : empty("暂无晚点名任务", "导入学籍并配置校园围栏后，即可发布任务。", button("新建任务", "edit-task", "secondary"));
+      : empty("暂无晚点名任务", "新建任务默认使用唐岛湾校区围栏。", button("新建任务", "edit-task", "secondary"));
     return hero("晚点名管理", "发布晚点名任务，查看年级进度与特殊情况。",
       button("新建任务", "edit-task", "light") + button("导入班级统计", "import", "outline-light") + button("特殊情况邮箱", "all-messages", "outline-light"))
       + layout(panel("点名任务", cards, "", "task-switch-panel") + renderBoard(task), aside);
@@ -111,7 +132,9 @@ export function build(ctx) {
   function taskEdit(id, edits = null) {
     const task = edits ?? (id ? taskFor(id) : null);
     const classes = groups();
-    const fences = ctx.state.fences.map(item => item.name);
+    const fences = availableFences().map(item => item.name);
+    const savedFences = (task?.fenceNames ?? []).filter(name => fences.includes(name));
+    const selectedFences = savedFences.length ? savedFences : fences.slice(0, 1);
     const now = Date.now();
     ctx.show(task ? "编辑草稿" : "新建点名任务", form("task", (!classes.length || !fences.length
       ? note("发布需要学籍名单和至少一个已配置的校区。可先保存草稿。", true) : "")
@@ -120,7 +143,7 @@ export function build(ctx) {
       + '<div class="field-grid">' + input("opens", "开放时间（北京时间）", beijingInput(task?.opens ?? now), 'type="datetime-local" required')
       + input("due", "截止时间（北京时间）", beijingInput(task?.due ?? now + 3 * 3600000), 'type="datetime-local" required') + '</div>'
       + (classes.length ? checklist("groups", "适用班级", classes, task?.groups?.filter(group => classes.includes(group)) ?? classes) : "")
-      + (fences.length ? checklist("fences", "允许打卡校区", fences, task?.fenceNames ?? fences.slice(0, 1)) : "")
+      + (fences.length ? checklist("fences", "允许打卡校区", fences, selectedFences) : "")
       + '<div class="actions"><button type="submit" class="button secondary" value="draft">保存草稿</button>'
       + '<button type="submit" class="button" value="publish">预览发布</button></div>', id));
   }
@@ -225,8 +248,8 @@ export function build(ctx) {
     students() { return rosterPreview("roster"); },
     staff() { return rosterPreview("staff"); },
     fence(name) {
-      const existing = ctx.state.fences.find(item => item.name === name);
-      ctx.show("配置校区围栏", form("fence", select("name", "校区", campusNames.map(item => [item, item]), name || campusNames[0])
+      const existing = customFences().find(item => item.name === name);
+      ctx.show("配置其他校区围栏", form("fence", select("name", "校区", customCampuses.map(item => [item, item]), existing?.name ?? customCampuses[0])
         + '<p class="meta">使用经校方核实的 WGS 84 GeoJSON。文件支持 Polygon 或 MultiPolygon，可用 Feature 包装。</p>'
         + '<label class="field"><span>校园边界文件</span><input type="file" name="geometry" accept=".geojson,.json,application/geo+json,application/json"'
         + (!existing ? " required" : "") + '></label><div class="field-grid">'
@@ -320,7 +343,8 @@ export function build(ctx) {
     async fence(data, original) {
       const file = data.get("geometry");
       const name = data.get("name");
-      const existing = ctx.state.fences.find(item => item.name === original && item.name === name);
+      need(customCampuses.includes(name), "唐岛湾校区使用系统预设围栏。");
+      const existing = customFences().find(item => item.name === original && item.name === name);
       const geometry = file?.size ? await ctx.read(file) : existing?.geometry;
       const fence = validateFence({name, version: newId(), buffer: Number(data.get("buffer")),
         maxAccuracy: Number(data.get("accuracy")), geometry, testOnly: !file?.size && existing?.testOnly === true});
@@ -336,7 +360,7 @@ export function build(ctx) {
       need(row.opens < row.due, "截止时间必须晚于开放时间。");
       if (mode === "publish") {
         need(Date.parse(row.due) > now, "截止时间须晚于当前时间。");
-        const fences = ctx.state.fences.filter(item => row.fenceNames.includes(item.name));
+        const fences = availableFences().filter(item => row.fenceNames.includes(item.name));
         const task = cleanTask({...row, mode: "published", fences});
         const students = ctx.state.roster.filter(person => task.groups.includes(person.group));
         need(students.length > 0 && task.groups.every(group => students.some(item => item.group === group)), "适用班级的学籍名单为空。");
