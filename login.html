@@ -7,17 +7,17 @@
   <title>登录 · 晚点名报备 | 青岛软件学院、计算机科学与技术学院</title>
   <link rel="icon" href="./assets/college-mark.webp" type="image/webp">
   <link rel="stylesheet" href="./assets/site.css?v=3">
-  <link rel="stylesheet" href="./assets/login.css?v=3">
+  <link rel="stylesheet" href="./assets/login.css?v=5">
   <script type="module" src="./assets/login.mjs?v=2"></script>
 </head>
 <body data-role="login">
   <a class="skip" href="#main">跳到登录表单</a>
   <header class="masthead">
     <div class="wrap masthead-inner">
-      <a class="brand" href="./index.html">
+      <div class="brand">
         <img src="./assets/college-mark.webp" width="47" height="47" alt="学院徽标">
         <span><span class="university">中国石油大学（华东）</span><strong>青岛软件学院、计算机科学与技术学院</strong></span>
-      </a>
+      </div>
     </div>
   </header>
   <main id="main" class="wrap login-layout">
@@ -47,6 +47,7 @@
         </div>
         <p id="login-error" class="form-error" role="alert" hidden></p>
         <button type="submit" class="button login-button" disabled>登录</button>
+        <p class="meta login-instruction">学生登录时，用户名即姓名，密码即学号。</p>
       </form>
       <noscript><p class="meta">请启用 JavaScript 后登录。</p></noscript>
     </section>

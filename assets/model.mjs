@@ -118,6 +118,7 @@ const comparable = item => JSON.stringify(item);
 
 export function importTask(state, raw) {
   const incoming = cleanTask(raw);
+  need(!isSharedTask(state, incoming.id), "线上任务的更新会自动同步。");
   const index = state.tasks.findIndex(task => task.id === incoming.id);
   if (index < 0) {
     state.tasks.push(incoming);
@@ -139,6 +140,25 @@ export function importTask(state, raw) {
   }
   state.tasks[index] = incoming;
   return incoming.mode === "revoked" ? "已导入撤销通知" : "已更新任务";
+}
+
+export function isSharedTask(state, id) {
+  return (state.sharedTaskIds ?? []).includes(id);
+}
+
+export function applySharedTask(state, {task: raw, snapshots}) {
+  const incoming = cleanTask(raw);
+  const previous = state.tasks.find(task => task.id === incoming.id);
+  if (isSharedTask(state, incoming.id) && previous?.revision > incoming.revision) return;
+  state.tasks = state.tasks.filter(task => task.id !== incoming.id);
+  state.tasks.push(incoming);
+  if (!isSharedTask(state, incoming.id)) (state.sharedTaskIds ??= []).push(incoming.id);
+  if (archived(state, incoming.id) && previous?.due < incoming.due && statusOf(incoming) === "active") {
+    state.archives = state.archives.filter(id => id !== incoming.id);
+  }
+  if (archived(state, incoming.id)) return;
+  state.snapshots = state.snapshots.filter(item => item.taskId !== incoming.id);
+  for (const snapshot of snapshots) importRoster(state, snapshot);
 }
 
 export function classRoster(state, taskId, group) {

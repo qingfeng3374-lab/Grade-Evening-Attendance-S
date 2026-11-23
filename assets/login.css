@@ -24,6 +24,7 @@
 .password-row input { padding-inline-end: 4.4rem !important; }
 .password-row .button { position: absolute; inset: 1px 1px 1px auto; min-height: 0; }
 .login-button { width: 100%; margin-top: .85rem; }
+.login-instruction { margin-top: .7rem; text-align: center; }
 @media (max-width: 700px) {
   .login-layout { grid-template-columns: 1fr; gap: 11px; margin-block: 15px 25px; }
   .login-hero { min-height: 132px; }

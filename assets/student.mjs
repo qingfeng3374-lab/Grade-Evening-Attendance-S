@@ -1,4 +1,4 @@
-import {archived, cleanReceipt, displayTime, field, importTask, need, newId, recordImport, statusOf, unpack, validatePerson} from "./model.mjs";
+import {archived, cleanReceipt, displayTime, field, importTask, isSharedTask, need, newId, recordImport, statusOf, unpack, validatePerson} from "./model.mjs?v=5";
 import {judgePosition} from "./geo.mjs";
 import {area, button, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys,
   select, submit, tag, taskCard, taskOrder} from "./ui.mjs";
@@ -13,7 +13,8 @@ export function build(ctx) {
   let selectedTask;
   let prepared;
 
-  const getTask = id => need(ctx.state.tasks.find(task => task.id === id), "请先导入对应任务包。");
+  const getTask = id => need(ctx.state.tasks.find(task => task.id === id), "当前任务不可用。");
+  const taskControl = () => ctx.online ? button("刷新任务", "refresh-tasks", "light") : button("导入任务", "import", "light");
   const current = task => ctx.state.receipts.find(item => item.record.taskId === task.id
     && item.record.studentId === ctx.state.profile?.id)?.record;
   const groups = () => [...new Set(ctx.state.tasks.flatMap(task => task.groups))];
@@ -30,12 +31,14 @@ export function build(ctx) {
     const alerts = ui.reminder ? (reminder
       ? note("收到晚点名提醒，请查看对应任务。") + '<div class="actions">' + button("查看提醒任务", "task", "secondary", reminder.id) + '</div>'
       : note(profile && ctx.state.tasks.some(task => task.id === ui.reminder)
-        ? "该提醒任务未包含当前班级。请核对学生信息。" : "收到晚点名提醒，请先导入对应任务包并确认学生信息。")) : "";
+        ? "该提醒任务未包含当前班级。请核对学生信息。"
+        : ctx.online ? "正在同步提醒对应的任务。若未出现，可刷新任务列表。" : "收到晚点名提醒，请先导入对应任务包。")) : "";
     const main = (alerts ? panel("任务提醒", alerts) : "") + panel("待办理任务", remaining.length
       ? '<div class="task-list">' + remaining.map(task => taskCard(task, "active", button("去填报", "task", "", task.id))).join("") + '</div>'
       : empty(!profile ? "先填写学生信息" : "暂无待办", !profile ? "填写姓名、学号和班级，即可查看适用任务。"
-        : ctx.state.tasks.length ? "当前班级没有需要填报的任务。" : "请下载管理员发来的任务包，再导入此处。",
-        button(profile ? "导入任务" : "填写学生信息", profile ? "import" : "profile", "secondary")))
+        : ctx.online ? "管理端发布后，本班的待办任务会出现在这里。"
+          : ctx.state.tasks.length ? "当前班级没有需要填报的任务。" : "请导入管理员发来的任务包。",
+        !profile ? button("填写学生信息", "profile", "secondary") : ctx.online ? "" : button("导入任务", "import", "secondary")))
       + (upcoming.length ? panel("即将开始", '<div class="task-list">' + upcoming.map(task =>
         taskCard(task, "waiting", button("详情", "task", "secondary", task.id), false, "开放 " + displayTime(task.opens))).join("") + '</div>') : "")
       + (history.length ? panel("历史任务", '<div class="task-list">' + history.map(task =>
@@ -46,9 +49,10 @@ export function build(ctx) {
         + ' · ' + escape(profile.id) + '</p>' + (ctx.demo ? '<div class="actions">' + button("编辑信息", "profile", "secondary") + '</div>'
           : '<p class="tiny">打卡回执会自动使用以上学籍信息。</p>')
       : '<p class="meta">请使用学籍表中的班级和学号。</p><div class="actions">' + button("填写信息", "profile", "secondary") + '</div>')
-      + panel("如何提交", '<ol class="side-rule"><li>导入班群发来的任务包。</li><li>在截止前完成在校打卡或离校报备。</li><li>下载回执，私发给本班负责人。</li></ol>', "", "soft");
+      + panel("如何提交", '<ol class="side-rule"><li>' + (ctx.online ? "打开本班发布的任务。" : "导入班群发来的任务包。")
+        + '</li><li>在截止前完成在校打卡或离校报备。</li><li>下载回执，私发给本班负责人。</li></ol>', "", "soft");
     return hero("晚点名打卡", remaining.length ? "有 " + remaining.length + " 项任务待填写。"
-      : "在校定位打卡，离校填写报备。", button("导入任务", "import", "light"), true) + layout(main, sidebar);
+      : "在校定位打卡，离校填写报备。", taskControl(), true) + layout(main, sidebar);
   }
 
   function profileDialog() {
@@ -96,6 +100,7 @@ export function build(ctx) {
   }
 
   async function save(id, fields) {
+    if (ctx.online && isSharedTask(ctx.state, id)) await ctx.syncTasks();
     await ctx.edit(state => {
       const task = need(state.tasks.find(item => item.id === id), "任务不存在。");
       const p = ctx.account?.person ?? state.profile;
@@ -144,12 +149,21 @@ export function build(ctx) {
     if (task && isMyTask(task)) openTask(task.id);
   }
 
-  return {render, start() {
-    openReminder();
+  let openedReminder;
+  function promptReminder() {
+    if (ui.reminder && openedReminder !== ui.reminder && !ctx.dialog.open && ctx.state.tasks.some(task => task.id === ui.reminder && isMyTask(task))) {
+      openedReminder = ui.reminder;
+      openReminder();
+    }
+  }
+
+  return {render, onTasksSynced: promptReminder, start() {
+    promptReminder();
     window.addEventListener("hashchange", () => {
       readReminder();
+      openedReminder = null;
       ctx.draw();
-      openReminder();
+      promptReminder();
     });
   }, actions: {
     profile: profileDialog, task(id) { openTask(id); }, locate,

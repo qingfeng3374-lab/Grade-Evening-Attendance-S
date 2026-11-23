@@ -1,5 +1,5 @@
-import {adminRows, archived, beijingInput, classRoster, cleanTask, displayTime, field, importException, importReport, need, newId, parseCSV, rate,
-  readBeijing, recordImport, statusOf, summarize, unpack} from "./model.mjs?v=2";
+import {adminRows, applySharedTask, archived, beijingInput, classRoster, cleanTask, displayTime, field, importException, importReport,
+  isSharedTask, need, newId, parseCSV, rate, readBeijing, recordImport, statusOf, summarize, unpack} from "./model.mjs?v=5";
 import {campusNames, validateFence} from "./geo.mjs";
 import {area, button, checklist, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys,
   completionBar, distribution, select, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=2";
@@ -27,8 +27,10 @@ export async function build(ctx) {
   let detailGroup;
   let onlineMessages = [];
 
-  const groups = () => [...new Set(ctx.state.roster.map(person => person.group))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const publishRoster = () => ctx.account?.roster ?? ctx.state.roster;
+  const groups = () => [...new Set(publishRoster().map(person => person.group))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const taskFor = id => need(ctx.state.tasks.find(task => task.id === id), "找不到任务。");
+  const shared = id => isSharedTask(ctx.state, id);
   const customFences = () => ctx.state.fences.filter(item => customCampuses.includes(item.name));
   const availableFences = () => presetFence ? [presetFence, ...customFences()] : customFences();
 
@@ -67,7 +69,7 @@ export async function build(ctx) {
         ["已完成报备", done], [coverage, rate(done, total)]])
       + (seen.length ? distribution(summarize(seen.flatMap(row => row.rows)), "已汇总班级报备分布")
         + '<p class="meta">最新导入 ' + escape(displayTime(last)) + ' · 北京时间</p>' : '<p class="meta">导入班级统计后显示完成率和分布。</p>')
-      + '<div class="actions">' + button("下载发布文件", "downloads", "secondary", task.id)
+      + '<div class="actions">' + (shared(task.id) ? "" : button("下载发布文件", "downloads", "secondary", task.id))
       + (status !== "revoked" ? button("延长截止", "extend", "secondary", task.id)
         + button("撤销任务", "revoke", "danger", task.id) : "") + '</div>'
       + '<div class="actions">' + button("导出年级汇总", "csv-summary", "secondary")
@@ -104,11 +106,11 @@ export async function build(ctx) {
     ui.task = task?.id;
     const missing = groups().filter(group => !ctx.state.staff.some(person => person.group === group
       && ctx.state.roster.some(item => item.id === person.id && item.group === group && item.name === person.name)));
-    const roster = '<p class="meta">' + ctx.state.roster.length + ' 名学生 · ' + groups().length + ' 个班级 · '
+    const roster = '<p class="meta">' + publishRoster().length + ' 名学生 · ' + groups().length + ' 个班级 · '
       + ctx.state.staff.length + ' 条负责人记录</p>'
       + (ctx.state.staff.length && missing.length ? '<p class="tiny">待核对负责人 ' + escape(missing.join("、")) + '</p>' : "")
       + '<div class="actions">' + button("导入学籍 CSV", "students", "secondary") + button("导入负责人 CSV", "staff", "secondary") + '</div>'
-      + '<p class="tiny">CSV 需含姓名、班级和学号，以 UTF-8 保存。</p>';
+      + '<p class="tiny">' + (ctx.online ? "线上发布按服务器学籍生成应报名单。CSV 可更新本机名单。" : "CSV 需含姓名、班级和学号，以 UTF-8 保存。") + '</p>';
     const fences = (presetFence ? '<div class="rows"><div class="list-row"><div><strong>' + escape(presetFence.name)
         + '</strong><p class="tiny">边界外延 ' + presetFence.buffer + ' 米 · 误差上限 ' + presetFence.maxAccuracy + ' 米</p></div>'
         + tag("系统预设") + '</div></div><p class="tiny"><a href="' + boundaryPath
@@ -267,7 +269,8 @@ export async function build(ctx) {
       const task = taskFor(id);
       ctx.show("延长截止时间", form("extend", keys([["任务", task.title], ["当前截止", displayTime(task.due)]])
         + input("due", "新截止时间（北京时间）", beijingInput(Math.max(Date.now(), Date.parse(task.due)) + 3600000),
-          'type="datetime-local" required') + '<p class="meta">保存后会生成新版本，需重新转发给学生和负责人。</p><div class="actions">'
+          'type="datetime-local" required') + '<p class="meta">'
+        + (shared(id) ? "保存后会自动同步给学生和负责人。" : "保存后会生成新版本，需重新转发给学生和负责人。") + '</p><div class="actions">'
         + submit("保存新版本") + '</div>', id));
     },
     delete(id) {
@@ -277,7 +280,8 @@ export async function build(ctx) {
     },
     revoke(id) {
       const task = taskFor(id);
-      ctx.show("撤销任务", form("revoke", note("撤销「" + task.title + "」后保留已导入的数据。请将撤销通知转发给学生和负责人。", true)
+      ctx.show("撤销任务", form("revoke", note("撤销「" + task.title + "」后保留已导入的数据。"
+        + (shared(id) ? "撤销状态会自动同步。" : "请将撤销通知转发给学生和负责人。"), true)
         + '<div class="actions">' + submit("确认撤销", "danger") + '</div>', id));
     },
     import() { return openImport(["statistics", "report"], "班级统计导入预览"); },
@@ -362,12 +366,12 @@ export async function build(ctx) {
         need(Date.parse(row.due) > now, "截止时间须晚于当前时间。");
         const fences = availableFences().filter(item => row.fenceNames.includes(item.name));
         const task = cleanTask({...row, mode: "published", fences});
-        const students = ctx.state.roster.filter(person => task.groups.includes(person.group));
+        const students = publishRoster().filter(person => task.groups.includes(person.group));
         need(students.length > 0 && task.groups.every(group => students.some(item => item.group === group)), "适用班级的学籍名单为空。");
         publication = {fromDraft: Boolean(id), task, students};
         ctx.show("发布预览", form("publish", keys([["任务", task.title], ["截止时间", displayTime(task.due)],
           ["适用班级", task.groups.join("、")], ["应报人数", students.length], ["允许校区", task.fences.map(item => item.name).join("、")]])
-          + note("发布后将锁定名单与定位校验范围。")
+          + note(ctx.online ? "发布后，这些班级的学生和负责人会直接看到任务。" : "发布后将锁定名单与定位校验范围。")
           + '<div class="actions">' + submit("确认发布") + button("返回编辑", "restore-task", "secondary") + '</div>'));
         ui.draftEditing = row;
       } else {
@@ -385,6 +389,14 @@ export async function build(ctx) {
     },
     async publish() {
       const {task, students, fromDraft} = publication;
+      if (ctx.online) {
+        const item = await ctx.request("/tasks", {method: "POST", body: task});
+        ui.task = item.task.id;
+        await ctx.edit(state => applySharedTask(state, item));
+        ctx.close();
+        ctx.toast("任务已发布，学生端和负责人端将自动更新。");
+        return;
+      }
       await ctx.edit(state => {
         const existing = state.tasks.find(item => item.id === task.id);
         need((!existing && !fromDraft) || existing?.mode === "draft", "该任务已变更。");
@@ -405,6 +417,13 @@ export async function build(ctx) {
     },
     async extend(data, id) {
       const due = readBeijing(data.get("due"));
+      if (shared(id)) {
+        const item = await ctx.request("/tasks/" + id + "/extend", {method: "POST", body: {due, revision: taskFor(id).revision}});
+        await ctx.edit(state => applySharedTask(state, item));
+        ctx.close();
+        ctx.toast("截止时间已更新，将自动同步。");
+        return;
+      }
       await ctx.edit(state => {
         const task = need(state.tasks.find(item => item.id === id && item.mode === "published"), "任务不可延长。");
         need(due > task.due && Date.parse(due) > Date.now(), "请把截止时间延至当前时间之后。");
@@ -422,6 +441,13 @@ export async function build(ctx) {
       ctx.toast("已删除草稿。");
     },
     async revoke(_, id) {
+      if (shared(id)) {
+        const item = await ctx.request("/tasks/" + id + "/revoke", {method: "POST", body: {revision: taskFor(id).revision}});
+        await ctx.edit(state => applySharedTask(state, item));
+        ctx.close();
+        ctx.toast("任务已撤销，将自动同步。");
+        return;
+      }
       await ctx.edit(state => {
         const task = need(state.tasks.find(item => item.id === id && item.mode === "published"), "任务不可撤销。");
         task.mode = "revoked";

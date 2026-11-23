@@ -1,4 +1,4 @@
-import {archiveTask, archived, blank, csvText, displayTime, need, packet, roleNames, statusOf} from "./model.mjs?v=2";
+import {applySharedTask, archiveTask, archived, blank, csvText, displayTime, need, packet, roleNames, statusOf} from "./model.mjs?v=5";
 import {openWorkspace, readWorkspace} from "./storage.mjs";
 import {button, escape, form, note, select, submit} from "./ui.mjs?v=2";
 
@@ -8,7 +8,7 @@ const fileInput = document.querySelector("#files");
 const live = document.querySelector("#live");
 const role = document.body.dataset.role;
 const demo = new URLSearchParams(location.search).get("demo") === "1";
-const routes = {student: "./student.mjs", leader: "./leader.mjs?v=2", admin: "./admin.mjs?v=4"};
+const routes = {student: "./student.mjs?v=5", leader: "./leader.mjs?v=5", admin: "./admin.mjs?v=5"};
 const ui = {};
 let storage;
 let workspace;
@@ -18,6 +18,9 @@ let timer;
 let taskPhases;
 let auth;
 let session;
+let taskCursor = 0;
+let pendingTaskSync;
+let deferredTaskDraw = false;
 
 function toast(message, failure = false) {
   clearTimeout(timer);
@@ -28,6 +31,7 @@ function toast(message, failure = false) {
 }
 
 function draw() {
+  deferredTaskDraw = false;
   const demoMark = demo
     ? '<div class="demo-bar"><span><strong>演示模式</strong> · 示例记录独立保存</span><a href="./' + role + '.html">退出演示</a></div>' : "";
   root.innerHTML = demoMark + screen.render();
@@ -71,6 +75,10 @@ const commonActions = {
     leave();
   },
   "data-tools": dataDialog,
+  async "refresh-tasks"() {
+    await syncTasks();
+    toast("任务列表已刷新。");
+  },
   "data-backup"() {
     json("晚点名本机备份-" + roleNames[role] + "-" + new Date().toISOString().slice(0, 10), "backup",
       {role, createdAt: new Date().toISOString(), workspace});
@@ -93,6 +101,7 @@ const commonForms = {
 
 dialog.addEventListener("close", () => {
   if (dialog.open) return;
+  if (deferredTaskDraw && screen) draw();
   if (lastFocus?.isConnected) lastFocus.focus();
   else {
     root.tabIndex = -1;
@@ -153,6 +162,7 @@ async function shareText(text, source) {
 const ctx = {
   role, demo, online: !demo, ui, get state() { return workspace; },
   get account() { return session?.profile ?? null; },
+  syncTasks,
   async request(path, options) {
     try {
       return await auth.request(path, options);
@@ -166,6 +176,26 @@ const ctx = {
   },
   root, dialog, draw, edit, show, close, toast, pick, read, json, csv, shareText,
 };
+
+function syncTasks() {
+  if (demo) return Promise.resolve();
+  return pendingTaskSync ??= (async () => {
+    const {items, cursor} = await ctx.request("/tasks?since=" + taskCursor);
+    if (items.length) {
+      await edit(state => { for (const item of items) applySharedTask(state, item); }, {redraw: false});
+      if (dialog.open) deferredTaskDraw = true;
+      else {
+        draw();
+        screen.onTasksSynced?.();
+      }
+    }
+    taskCursor = cursor;
+  })().finally(() => { pendingTaskSync = null; });
+}
+
+function refreshTasksInBackground() {
+  void syncTasks().catch(() => {});
+}
 
 function leave() {
   root.replaceChildren();
@@ -251,22 +281,28 @@ async function init() {
   footerLinks.append(schoolLink);
   footer.append(footerLinks);
   screen.start?.();
+  refreshTasksInBackground();
   window.addEventListener("pageshow", async event => {
     if (event.persisted && canContinue() && !dialog.open) {
       workspace = await storage.read();
       draw();
+      refreshTasksInBackground();
     }
   });
   document.addEventListener("visibilitychange", async () => {
     if (document.visibilityState === "visible" && canContinue() && !dialog.open) {
       workspace = await storage.read();
       draw();
+      refreshTasksInBackground();
     }
   });
   setInterval(() => {
     if (document.visibilityState === "visible" && canContinue() && !dialog.open
         && workspace.tasks.map(task => statusOf(task)).join("/") !== taskPhases) draw();
   }, 30000);
+  if (!demo) setInterval(() => {
+    if (document.visibilityState === "visible" && canContinue()) refreshTasksInBackground();
+  }, 15000);
 }
 
 document.addEventListener("click", async event => {

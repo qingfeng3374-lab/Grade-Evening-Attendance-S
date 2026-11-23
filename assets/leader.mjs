@@ -1,5 +1,5 @@
-import {archived, classRoster, classRows, cleanException, displayTime, field, importReceipt, importRoster, importTask, need, newId,
-  rate, recordImport, reportRows, resolveReceipt, statusOf, summarize, unpack} from "./model.mjs?v=2";
+import {archived, classRoster, classRows, cleanException, displayTime, field, importReceipt, importRoster, importTask, isSharedTask,
+  need, newId, rate, recordImport, reportRows, resolveReceipt, statusOf, summarize, unpack} from "./model.mjs?v=5";
 import {area, button, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys, select,
   distribution, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=2";
 
@@ -41,8 +41,9 @@ export function build(ctx) {
   function board(task, snapshot) {
     if (!task) return "";
     if (archived(ctx.state, task.id)) return panel(task.title, tag(task.current) + note("已清理此任务的本机报备数据。"));
-    if (!snapshot) return panel("本班打卡情况", empty("请先导入本班应报名单", "名单由管理员按任务单独发给班级负责人。",
-      button("导入文件", "import", "secondary")));
+    if (!snapshot) return panel("本班打卡情况", isSharedTask(ctx.state, task.id)
+      ? empty("本班名单暂不可用", "请刷新并重新同步本班任务。", button("刷新任务", "refresh-tasks", "secondary"))
+      : empty("请先导入本班应报名单", "名单由管理员按任务单独发给班级负责人。", button("导入文件", "import", "secondary")));
     const rows = classRows(ctx.state, snapshot);
     const c = summarize(rows);
     const last = ctx.state.sentReports.find(item => item.taskId === task.id && item.group === snapshot.group);
@@ -62,12 +63,14 @@ export function build(ctx) {
 
   function render() {
     const {groups, tasks, task, snapshot} = context();
-    const aside = panel("操作指南", '<ol class="side-rule"><li>导入任务、本班名单和学生回执。</li><li>导出班级统计，供年级汇总。</li><li>需要管理员处理时，报送特殊情况。</li></ol>', "", "soft");
+    const aside = panel("操作指南", '<ol class="side-rule"><li>' + (ctx.online ? "查看自动同步的本班任务并导入学生回执。" : "导入任务、本班名单和学生回执。")
+      + '</li><li>导出班级统计，供年级汇总。</li><li>需要管理员处理时，报送特殊情况。</li></ol>', "", "soft");
     const classChoice = groups.length > 1 ? select("group", "当前班级", groups.map(group => [group, group]), ui.group) : "";
     const cards = tasks.length ? '<div class="mobile-task-switch">' + select("task-switch", "切换任务", tasks.map(item => [item.id, item.title]), task.id)
       + '</div><div class="task-list desktop-task-list">' + tasks.map(item => taskCard(item, item.current,
       button(task?.id === item.id ? "当前查看" : "查看进度", "task", "secondary", item.id), task?.id === item.id)).join("") + '</div>' :
-      empty("暂无班级任务", "收到管理端文件后，先导入任务包和本班应报名单。", button("导入文件", "import", "secondary"));
+      (ctx.online ? empty("暂无班级任务", "管理端发布后，本班任务和应报名单会自动显示。")
+        : empty("暂无班级任务", "收到管理端文件后，先导入任务包和本班应报名单。", button("导入文件", "import", "secondary")));
     return hero("班级负责人端", ui.group ? ui.group + " · 晚点名进度与报送" : "核对本班晚点名进度，提醒学生并汇总报送。", button("导入文件", "import", "light"))
       + layout(panel("本班任务", classChoice + cards, "", "task-switch-panel") + board(task, snapshot), aside);
   }
@@ -152,7 +155,9 @@ export function build(ctx) {
       if (ctx.demo) url.searchParams.set("demo", "1");
       url.hash = new URLSearchParams({task: task.id, reminder: newId(), at: new Date().toISOString()}).toString();
       const parts = [(name ? name + "，请" : "请") + "在 " + displayTime(task.due) + "（北京时间）前完成「" + task.title
-        + "」，并将个人回执私发给班级负责人。", "如尚未导入任务，请先使用班群里的任务包。", url.href];
+        + "」，并将个人回执私发给班级负责人。"];
+      if (!isSharedTask(ctx.state, task.id)) parts.push("如尚未导入任务，请先使用班群里的任务包。");
+      parts.push(url.href);
       ctx.show(name ? "提醒 " + name : "本班打卡提醒", '<p class="meta">复制文案后，通过班群或私聊转发。链接会打开对应任务。</p>'
         + area("reminder", "提醒文案", parts.join("\n"), "readonly rows=\"5\"")
         + '<div class="actions">' + button("复制提醒", "copy") + '</div>');
