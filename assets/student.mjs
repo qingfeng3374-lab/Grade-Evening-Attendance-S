@@ -129,7 +129,7 @@ export function build(ctx) {
       openTask(id);
     } else openTask(id, result.status === "outside"
       ? "当前位置超出任务允许区域，请核对位置后重新选择。"
-      : "定位精度不足或靠近范围边界，请到开阔处重试。");
+      : "定位精度不足或靠近范围边界，请到开阔处重试（或猛猛再点几次，浏览器定位精度问题）");
   }
 
   async function locate() {
