@@ -25,6 +25,21 @@ export async function readWorkspace(key) {
   return readRecord(await database(), key);
 }
 
+export function openTemporaryWorkspace(seed) {
+  let value = seed();
+  return {
+    async read() {
+      return structuredClone(value);
+    },
+    async edit(update) {
+      const draft = structuredClone(value);
+      update(draft);
+      value = draft;
+      return structuredClone(draft);
+    },
+  };
+}
+
 export async function openWorkspace(key, seed) {
   const db = await database();
 

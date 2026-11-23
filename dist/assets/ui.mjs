@@ -1,4 +1,4 @@
-import {displayTime, rate, statuses} from "./model.mjs?v=2";
+import {displayTime, rate, statuses} from "./model.mjs?v=10";
 
 export const escape = value => String(value ?? "").replace(/[&<>"']/g, char =>
   ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[char]);
@@ -109,8 +109,8 @@ export function receiptKeys(record) {
       : [["离校原因", record.reason]])];
 }
 
-export function serializeDetails(rows, title) {
-  return [["任务", "班级", "姓名", "学号", "状态", "填报时间（北京时间）", "判定校区", "打卡地点", "定位精度（米）", "离校原因"],
+export function serializeDetails(rows, title, studentColumn = "学号") {
+  return [["任务", "班级", "姓名", studentColumn, "状态", "填报时间（北京时间）", "判定校区", "打卡地点", "定位精度（米）", "离校原因"],
     ...rows.map(row => [title, row.group, row.name, row.id, statuses[row.status]?.[0] ?? row.status,
       row.record ? displayTime(row.record.submittedAt) : "", row.record?.campus, row.record?.location, row.record?.accuracy,
       row.record?.reason])];

@@ -1,9 +1,10 @@
-import {authenticate, roleURL, signedIn} from "./auth.mjs?v=2";
+import {authenticate, roleURL, signedIn} from "./auth.mjs?v=3";
 
 const form = document.querySelector("#login-form");
 const username = document.querySelector("#username");
 const password = document.querySelector("#password");
 const toggle = document.querySelector("#password-toggle");
+const sharedDevice = document.querySelector("#shared-device");
 const errorLine = document.querySelector("#login-error");
 const submit = form.querySelector('button[type="submit"]');
 const task = new URLSearchParams(location.search).get("task");
@@ -32,7 +33,7 @@ form.addEventListener("submit", async event => {
   submit.textContent = "正在登录…";
   try {
     if (!isSecureContext || !crypto.subtle) throw new Error("请在 HTTPS 或本机预览地址打开后登录。");
-    const account = await authenticate(username.value, password.value);
+    const account = await authenticate(username.value, password.value, sharedDevice.checked);
     password.value = "";
     forward(account);
   } catch (error) {

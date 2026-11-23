@@ -1,8 +1,8 @@
 import {applyOnlineAttendance, archived, cleanReceipt, displayTime, field, importTask, isSharedTask, need, newId,
-  recordImport, statusOf, unpack, validatePerson} from "./model.mjs?v=9";
+  recordImport, statusOf, unpack, validatePerson} from "./model.mjs?v=10";
 import {judgePosition} from "./geo.mjs";
 import {area, button, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys,
-  select, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=9";
+  select, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=10";
 
 export function build(ctx) {
   const ui = ctx.ui;
@@ -91,7 +91,9 @@ export function build(ctx) {
     } else if (phase === "active") {
       if (record) content += note("已有本机记录，请重新选择在校或离校并在线提交。");
       if (message) content += note(message, true);
-      content += '<h3>你现在是否在校？</h3><div class="choice-grid">'
+      content += '<h3>你现在是否在校？</h3>'
+        + (ctx.online ? '<p class="meta">在校打卡会向签到服务提交本次坐标和精度。班级负责人和管理员可以查看签到地点。</p>' : "")
+        + '<div class="choice-grid">'
         + '<button type="button" class="choice" data-do="locate"><span class="icon pin" aria-hidden="true"></span><span><strong>是，我在校</strong><small>允许定位后自动校验</small></span></button>'
         + '<button type="button" class="choice" data-do="away"><span class="icon memo" aria-hidden="true"></span><span><strong>否，我不在校</strong><small>填写离校原因</small></span></button></div>';
       if (ctx.demo) content += '<div class="actions">' + button("模拟校内", "simulate-pass", "quiet compact")

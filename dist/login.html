@@ -2,13 +2,15 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self' https://47.104.168.245; base-uri 'none'; form-action 'self'">
+  <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b2e56">
   <title>登录 · 晚点名报备 | 青岛软件学院、计算机科学与技术学院</title>
   <link rel="icon" href="./assets/college-mark.webp" type="image/webp">
   <link rel="stylesheet" href="./assets/site.css?v=3">
   <link rel="stylesheet" href="./assets/login.css?v=6">
-  <script type="module" src="./assets/login.mjs?v=2"></script>
+  <script type="module" src="./assets/login.mjs?v=3"></script>
 </head>
 <body data-role="login">
   <a class="skip" href="#main">跳到登录表单</a>
@@ -45,9 +47,10 @@
             <button id="password-toggle" class="button quiet compact" type="button" aria-controls="password" aria-pressed="false">显示</button>
           </div>
         </div>
+        <label class="check"><input id="shared-device" type="checkbox"> 共享设备，仅在当前页面保留工作记录</label>
         <p id="login-error" class="form-error" role="alert" hidden></p>
         <button type="submit" class="button login-button" disabled>登录</button>
-        <p class="meta login-instruction">学生登录时，用户名即姓名，密码即学号。</p>
+        <p class="meta login-instruction">学生登录时，用户名即姓名，密码即学号。请妥善保管学号，学校统一认证密码仅用于官方入口。</p>
       </form>
       <noscript><p class="meta">请启用 JavaScript 后登录。</p></noscript>
     </section>

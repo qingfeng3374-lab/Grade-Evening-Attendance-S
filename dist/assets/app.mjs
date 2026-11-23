@@ -1,6 +1,7 @@
-import {applyOnlineAttendance, applySharedTask, archiveTask, archived, blank, csvText, displayTime, need, packet, roleNames, statusOf} from "./model.mjs?v=9";
-import {openWorkspace, readWorkspace} from "./storage.mjs";
-import {button, escape, form, note, select, submit} from "./ui.mjs?v=9";
+import {applyOnlineAttendance, applySharedTask, archiveTask, archived, blank, csvText, displayTime, isRosterReference, need,
+  packet, roleNames, statusOf} from "./model.mjs?v=10";
+import {openTemporaryWorkspace, openWorkspace, readWorkspace} from "./storage.mjs?v=2";
+import {button, escape, form, note, select, submit} from "./ui.mjs?v=10";
 
 const root = document.querySelector("main");
 const dialog = document.querySelector("#dialog");
@@ -8,7 +9,7 @@ const fileInput = document.querySelector("#files");
 const live = document.querySelector("#live");
 const role = document.body.dataset.role;
 const demo = new URLSearchParams(location.search).get("demo") === "1";
-const routes = {student: "./student.mjs?v=9", leader: "./leader.mjs?v=9", admin: "./admin.mjs?v=9"};
+const routes = {student: "./student.mjs?v=10", leader: "./leader.mjs?v=10", admin: "./admin.mjs?v=10"};
 const ui = {};
 let storage;
 let workspace;
@@ -60,7 +61,8 @@ function dataDialog() {
   const active = workspace.tasks.filter(task =>
     ["ended", "revoked"].includes(statusOf(task)) && !archived(workspace, task.id));
   const audits = (workspace.imports ?? []).slice(0, 8);
-  show("本机数据", '<p class="meta">备份可能包含学籍或个人回执，请妥善保管。</p><div class="actions">'
+  show("本机数据", (session?.sharedDevice ? '<p class="meta">共享设备模式下，刷新或关闭页面会清空本次临时工作记录。</p>' : "")
+    + '<p class="meta">备份可能包含学籍或个人回执，请妥善保管。</p><div class="actions">'
     + button("下载本机备份", "data-backup", "secondary") + '</div>'
     + (active.length ? form("data-clean", select("task", "可清理的已结束任务", [["", "请选择任务"],
       ...active.map(task => [task.id, task.title])], "", "required") + '<div class="actions">'
@@ -252,6 +254,19 @@ function migrateLegacy(old, account) {
   return state;
 }
 
+function clearOldLeaderCache(state) {
+  const shared = new Set(state.sharedTaskIds ?? []);
+  state.snapshots = state.snapshots.filter(item =>
+    !shared.has(item.taskId) || item.students.every(student => isRosterReference(student.id)));
+  if (state.onlineAttendance) {
+    state.onlineAttendance = state.onlineAttendance.filter(record => isRosterReference(record.studentId));
+  }
+  for (const report of state.sentReports) {
+    if (shared.has(report.taskId) && report.rows?.some(row => !isRosterReference(row.id))) delete report.rows;
+  }
+  delete state.onlineAway;
+}
+
 function showAccount(profile) {
   const nav = document.querySelector(".nav");
   nav.classList.add("signed-nav");
@@ -269,7 +284,7 @@ async function init() {
     const {demoState} = await import("./demo.mjs");
     storage = await openWorkspace("demo-" + role, () => demoState(role));
   } else {
-    auth = await import("./auth.mjs?v=2");
+    auth = await import("./auth.mjs?v=3");
     session = await auth.signedIn();
     if (!session) {
       location.replace(auth.loginURL(role, location.hash));
@@ -280,11 +295,17 @@ async function init() {
       location.replace(auth.roleURL(profile.role));
       return;
     }
-    const privateKey = role === "admin" ? "live-admin" : "live-" + role + "-" + profile.accountId;
-    const old = role !== "admin" && !await readWorkspace(privateKey) ? await readWorkspace("live-" + role) : null;
-    storage = await openWorkspace(privateKey, () => migrateLegacy(old, profile));
+    if (session.sharedDevice) {
+      storage = openTemporaryWorkspace(blank);
+    } else {
+      const privateKey = role === "admin" ? "live-admin" : "live-" + role + "-" + profile.accountId;
+      const old = role !== "admin" && !await readWorkspace(privateKey) ? await readWorkspace("live-" + role) : null;
+      storage = await openWorkspace(privateKey, () => migrateLegacy(old, profile));
+    }
     if (role === "student") {
       await storage.edit(state => { state.profile = profile.person; });
+    } else if (role === "leader" && !session.sharedDevice) {
+      await storage.edit(clearOldLeaderCache);
     } else if (role === "admin") {
       await storage.edit(state => {
         if (state.accountDirectoryMarker === session.marker) return;
@@ -357,8 +378,9 @@ document.addEventListener("click", async event => {
 
 document.addEventListener("submit", async event => {
   const form = event.target.closest("form[data-form]");
-  if (!form || !screen || !canContinue()) return;
+  if (!form) return;
   event.preventDefault();
+  if (!screen || !canContinue()) return;
   const method = commonForms[form.dataset.form] ?? screen.forms[form.dataset.form];
   if (!method) return;
   const errorBox = form.querySelector(".form-error");

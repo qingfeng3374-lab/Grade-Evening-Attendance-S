@@ -18,6 +18,7 @@ export function field(value, label, max = 80) {
 }
 
 const validId = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(value);
+export const isRosterReference = value => typeof value === "string" && /^ref_[a-f0-9]{32}$/.test(value);
 
 export function studentId(value) {
   const result = field(value, "学号", 24);
@@ -86,8 +87,9 @@ function validTime(value) {
     && Number.isFinite(Date.parse(value)) && new Date(Date.parse(value)).toISOString() === value;
 }
 
-export function validatePerson(row) {
-  return {id: studentId(row?.id), name: field(row?.name, "姓名", 40), group: field(row?.group, "班级", 50)};
+export function validatePerson(row, allowReference = false) {
+  const id = allowReference === true && isRosterReference(row?.id) ? row.id : studentId(row?.id);
+  return {id, name: field(row?.name, "姓名", 40), group: field(row?.group, "班级", 50)};
 }
 
 export function packet(type, data, demo) {
@@ -160,19 +162,23 @@ export function applySharedTask(state, {task: raw, snapshots}) {
   }
   if (archived(state, incoming.id)) return;
   state.snapshots = state.snapshots.filter(item => item.taskId !== incoming.id);
-  for (const snapshot of snapshots) importRoster(state, snapshot);
+  for (const snapshot of snapshots) importRoster(state, snapshot, true);
 }
 
 export function classRoster(state, taskId, group) {
   return state.snapshots.find(item => item.taskId === taskId && item.group === group);
 }
 
-export function importRoster(state, raw) {
+export function importRoster(state, raw, online = false) {
   const task = need(state.tasks.find(item => item.id === raw?.taskId), "请先导入对应的任务包。");
   need(!archived(state, task.id), "此任务的本机报备数据已清理。");
   const group = field(raw.group, "班级", 50);
   need(task.groups.includes(group) && Array.isArray(raw.students) && raw.students.length <= 1500, "任务名单范围不符。");
-  const students = raw.students.map(validatePerson);
+  const students = raw.students.map(row => {
+    const person = validatePerson(row, online);
+    if (online && isRosterReference(row.reportRef)) person.reportRef = row.reportRef;
+    return person;
+  });
   need(students.every(student => student.group === group), "名单包含其他班的学生。");
   need(new Set(students.map(student => student.id)).size === students.length, "名单包含重复学号。");
   const existing = classRoster(state, task.id, group);
@@ -185,10 +191,10 @@ export function importRoster(state, raw) {
   return "已导入 " + group + " 应报名单";
 }
 
-export function cleanReceipt(raw) {
+export function cleanReceipt(raw, online = false) {
   need(validId(raw?.id) && validId(raw?.taskId) && validTime(raw.submittedAt)
     && Number.isSafeInteger(raw.revision) && raw.revision >= 1, "回执编号、任务版本或提交时间有误。");
-  const {id: number, name, group} = validatePerson({id: raw.studentId, name: raw.name, group: raw.group});
+  const {id: number, name, group} = validatePerson({id: raw.studentId, name: raw.name, group: raw.group}, online);
   const value = {id: raw.id, taskId: raw.taskId, revision: raw.revision,
     studentId: number, name, group, submittedAt: raw.submittedAt, result: raw.result};
   if (raw.result === "present") {
@@ -206,7 +212,7 @@ export function cleanReceipt(raw) {
 export function applyOnlineAttendance(state, incoming) {
   const records = new Map((state.onlineAttendance ?? state.onlineAway ?? []).map(record => [record.id, record]));
   for (const raw of incoming) {
-    const record = cleanReceipt(raw);
+    const record = cleanReceipt(raw, true);
     if (!archived(state, record.taskId)) records.set(record.id, record);
   }
   state.onlineAttendance = [...records.values()];
@@ -300,15 +306,18 @@ export function importReport(state, raw, now = new Date().toISOString()) {
   need(task.mode !== "revoked", "任务已撤销，停止接收新的班级报送。");
   const snapshot = need(classRoster(state, task.id, raw.group), "班级与该任务的应报名单不符。");
   need(Array.isArray(raw.rows) && raw.rows.length === snapshot.students.length, "报送人数与该班应报名单不符。");
+  const references = new Map(snapshot.students.filter(student => student.reportRef)
+    .map(student => [student.reportRef, student.id]));
   const registered = new Set(snapshot.students.map(student => student.id));
   const rows = raw.rows.map(row => {
-    need(registered.delete(row?.id) && ["present", "away", "pending", "missing"].includes(row.status),
+    const id = references.get(row?.id) ?? row?.id;
+    need(registered.delete(id) && ["present", "away", "pending", "missing"].includes(row.status),
       "报送包含重复学号、未知学号或无效状态。");
-    if (["missing", "pending"].includes(row.status)) return {id: row.id, status: row.status};
-    const record = cleanReceipt(row.record);
+    if (["missing", "pending"].includes(row.status)) return {id, status: row.status};
+    const record = cleanReceipt(row.record, true);
     need(record.studentId === row.id && record.group === raw.group && record.taskId === task.id
       && record.result === row.status && record.revision <= task.revision, "报送中的回执与任务或学生不符。");
-    return {id: row.id, status: row.status, record};
+    return {id, status: row.status, record: {...record, studentId: id}};
   });
   const report = {id: raw.id, version: raw.version, taskId: task.id, group: raw.group,
     createdAt: raw.createdAt, note: typeof raw.note === "string" ? raw.note.trim().slice(0, 1200) : "", rows};

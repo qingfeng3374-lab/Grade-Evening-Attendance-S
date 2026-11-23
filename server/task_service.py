@@ -1,6 +1,7 @@
 """Published tasks and class-scoped roster snapshots."""
 
 from datetime import datetime
+import hmac
 import json
 import math
 from pathlib import Path
@@ -136,7 +137,12 @@ def dump(data):
     return json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
 
 
-def read_item(db, row, account):
+def roster_reference(key, task_id, group, student_id):
+    payload = dump(["attendance-roster:v1", task_id, group, student_id]).encode()
+    return "ref_" + hmac.digest(key, payload, "sha256").hex()[:32]
+
+
+def read_item(db, row, account, reference_key):
     task = json.loads(row["payload"])
     role = account["role"]
     snapshots = []
@@ -146,8 +152,13 @@ def read_item(db, row, account):
         if role == "leader":
             sql += " AND class_name=?"
             args += (account["class_name"],)
-        snapshots = [{"taskId": task["id"], "group": snap["class_name"], "students": json.loads(snap["students"])}
-                     for snap in db.execute(sql + " ORDER BY class_name", args)]
+        for snap in db.execute(sql + " ORDER BY class_name", args):
+            group = snap["class_name"]
+            students = json.loads(snap["students"])
+            for student in students:
+                reference = roster_reference(reference_key, task["id"], group, student["id"])
+                student["id" if role == "leader" else "reportRef"] = reference
+            snapshots.append({"taskId": task["id"], "group": group, "students": students})
     return {"task": task, "snapshots": snapshots}
 
 
@@ -157,17 +168,20 @@ def feed_cursor(query, name):
     return int(raw)
 
 
-def attendance_record(row):
+def attendance_record(row, leader_reference_key=None):
     result = row["result"]
     details = {"reason": row["reason"]} if result == "away" else {"campus": row["campus"], "accuracy": row["accuracy"]}
     if result == "present" and row["location"]:
         details["location"] = row["location"]
-    return {"id": "online-" + result + "-" + str(row["sequence"]), "taskId": row["task_id"],
-            "studentId": row["student_id"], "group": row["class_name"], "name": row["student_name"],
+    task, group, student = row["task_id"], row["class_name"], row["student_id"]
+    if leader_reference_key is not None:
+        student = roster_reference(leader_reference_key, task, group, student)
+    return {"id": "online-" + result + "-" + str(row["sequence"]), "taskId": task,
+            "studentId": student, "group": group, "name": row["student_name"],
             "revision": row["revision"], "submittedAt": row["submitted_at"], "result": result, **details}
 
 
-def attendance_feed(db, account, since, task_since, away_only=False):
+def attendance_feed(db, account, since, task_since, reference_key, away_only=False):
     sql = """SELECT * FROM attendance_submissions WHERE (sequence>? OR task_id IN
              (SELECT id FROM published_tasks WHERE sync_version>?))"""
     args = (since, task_since)
@@ -180,11 +194,12 @@ def attendance_feed(db, account, since, task_since, away_only=False):
         sql += " AND student_id=?"
         args += (account["student_id"],)
     rows = db.execute(sql + " ORDER BY sequence", args).fetchall()
+    leader_key = reference_key if account["role"] == "leader" else None
     return {"cursor": max(since, rows[-1]["sequence"]) if rows else since,
-            "items": [attendance_record(row) for row in rows]}
+            "items": [attendance_record(row, leader_key) for row in rows]}
 
 
-def feed(db, account, query):
+def feed(db, account, query, reference_key):
     params = parse_qs(query)
     since = feed_cursor(params, "since")
     db.execute("BEGIN")
@@ -195,12 +210,12 @@ def feed(db, account, query):
         sql += " JOIN published_task_groups g ON g.task_id=t.id AND g.class_name=?"
         args = (account["class_name"],)
     rows = db.execute(sql + " WHERE t.sync_version>? ORDER BY t.sync_version", args + (since,)).fetchall()
-    items = [read_item(db, row, account) for row in rows]
+    items = [read_item(db, row, account, reference_key) for row in rows]
     result = {"cursor": max(cursor, since), "items": items}
     if "attendanceSince" in params:
-        result["attendance"] = attendance_feed(db, account, feed_cursor(params, "attendanceSince"), since)
+        result["attendance"] = attendance_feed(db, account, feed_cursor(params, "attendanceSince"), since, reference_key)
     elif "awaySince" in params:
-        result["away"] = attendance_feed(db, account, feed_cursor(params, "awaySince"), since, away_only=True)
+        result["away"] = attendance_feed(db, account, feed_cursor(params, "awaySince"), since, reference_key, away_only=True)
     return result
 
 
@@ -295,7 +310,7 @@ def next_version(db):
     return db.execute("SELECT COALESCE(MAX(sync_version),0)+1 FROM published_tasks").fetchone()[0]
 
 
-def publish(db, admin, raw, now):
+def publish(db, admin, raw, now, reference_key):
     task = clean_new_task(raw)
     payload = dump(task)
     with db:
@@ -303,7 +318,7 @@ def publish(db, admin, raw, now):
         current = db.execute("SELECT * FROM published_tasks WHERE id=?", (task["id"],)).fetchone()
         if current:
             require(current["original"] == payload, "该任务编号已使用，请刷新任务列表。", 409)
-            return read_item(db, current, admin)
+            return read_item(db, current, admin, reference_key)
         require(task["due"] > now, "任务截止时间已到。")
         snapshots = []
         for group in task["groups"]:
@@ -315,10 +330,10 @@ def publish(db, admin, raw, now):
         db.execute("INSERT INTO published_tasks VALUES (?,?,?,?)", (task["id"], payload, payload, next_version(db)))
         db.executemany("INSERT INTO published_task_groups VALUES (?,?,?)", snapshots)
         row = db.execute("SELECT * FROM published_tasks WHERE id=?", (task["id"],)).fetchone()
-        return read_item(db, row, admin)
+        return read_item(db, row, admin, reference_key)
 
 
-def update(db, admin, identifier, action, raw, now):
+def update(db, admin, identifier, action, raw, now, reference_key):
     revision = raw.get("revision")
     require(type(revision) is int and revision > 0, "任务版本无效。")
     due = timestamp(raw.get("due")) if action == "extend" else None
@@ -328,7 +343,7 @@ def update(db, admin, identifier, action, raw, now):
         require(row, "找不到这项线上任务。", 404)
         task = json.loads(row["payload"])
         if (action == "revoke" and task["mode"] == "revoked") or (action == "extend" and task["due"] == due and task["mode"] == "published"):
-            return read_item(db, row, admin)
+            return read_item(db, row, admin, reference_key)
         require(task["revision"] == revision and task["mode"] == "published", "任务已更新，请刷新后重试。", 409)
         if action == "extend":
             require(due > task["due"] and due > now, "新的截止时间必须晚于原截止时间和当前时间。")
@@ -338,4 +353,5 @@ def update(db, admin, identifier, action, raw, now):
         task["revision"] += 1
         db.execute("UPDATE published_tasks SET payload=?,sync_version=? WHERE id=?",
                    (dump(task), next_version(db), identifier))
-        return read_item(db, db.execute("SELECT * FROM published_tasks WHERE id=?", (identifier,)).fetchone(), admin)
+        row = db.execute("SELECT * FROM published_tasks WHERE id=?", (identifier,)).fetchone()
+        return read_item(db, row, admin, reference_key)

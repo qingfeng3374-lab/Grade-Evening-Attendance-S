@@ -1,7 +1,7 @@
-import {archived, classRoster, classRows, cleanException, displayTime, field, importReceipt, importRoster, importTask, isSharedTask,
-  need, newId, rate, recordImport, reportRows, resolveReceipt, statusOf, summarize, unpack} from "./model.mjs?v=9";
+import {archived, classRoster, classRows, cleanException, displayTime, field, importReceipt, importRoster, importTask, isRosterReference, isSharedTask,
+  need, newId, rate, recordImport, reportRows, resolveReceipt, statusOf, summarize, unpack} from "./model.mjs?v=10";
 import {area, button, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys, select,
-  distribution, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=9";
+  distribution, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=10";
 
 const pageSize = 15;
 const filterItems = [["", "全部状态"], ["missing", "未提交"], ["present", "在校打卡"], ["away", "离校报备"], ["pending", "待核验"]];
@@ -26,16 +26,20 @@ export function build(ctx) {
   function rowMarkup(rows) {
     const term = (ui.search ?? "").toLowerCase();
     const filtered = rows.filter(row => (!ui.filter || row.status === ui.filter)
-      && (!term || row.name.toLowerCase().includes(term) || row.id.includes(term)));
+      && (!term || row.name.toLowerCase().includes(term) || visibleId(row.id).toLowerCase().includes(term)));
     const maxPage = Math.max(0, Math.ceil(filtered.length / pageSize) - 1);
     ui.page = Math.min(ui.page ?? 0, maxPage);
     if (!filtered.length) return '<p class="meta">当前筛选下没有学生。</p>';
     const content = filtered.slice(ui.page * pageSize, (ui.page + 1) * pageSize).map(row =>
-      '<article class="list-row"><div><strong>' + escape(row.name) + '</strong><p class="tiny">' + escape(row.id)
+      '<article class="list-row"><div><strong>' + escape(row.name) + '</strong><p class="tiny">' + escape(visibleId(row.id))
       + '</p></div><div class="actions">' + tag(row.status) + button("详情", "detail", "quiet compact", row.id) + '</div></article>').join("");
     return content + (maxPage > 0 ? '<div class="actions"><span class="meta">第 ' + (ui.page + 1) + ' / ' + (maxPage + 1)
       + ' 页</span>' + (ui.page > 0 ? button("上一页", "page", "secondary compact", ui.page - 1) : "")
       + (ui.page < maxPage ? button("下一页", "page", "secondary compact", ui.page + 1) : "") + '</div>' : "");
+  }
+
+  function visibleId(id) {
+    return isRosterReference(id) ? id.slice(4, 16).toUpperCase() : id;
   }
 
   function board(task, snapshot) {
@@ -56,7 +60,7 @@ export function build(ctx) {
       + button("导出本班 CSV", "csv", "secondary") + (task.mode !== "revoked" ? button("导出班级统计", "statistics", "secondary") : "")
       + button("报送特殊情况", "exception") + '</div>'
       + (last ? '<p class="tiny">上次生成班级统计 ' + escape(displayTime(last.createdAt)) + ' · 第 ' + last.version + ' 版</p>' : "")
-      + '<div class="filters">' + input("search", "查找学生", ui.search, 'type="search" placeholder="姓名或学号" autocomplete="off"')
+      + '<div class="filters">' + input("search", "查找学生", ui.search, 'type="search" placeholder="姓名或名单编号" autocomplete="off"')
       + select("filter", "状态", filterItems, ui.filter ?? "") + '</div><div class="rows" id="student-rows" aria-live="polite">'
       + rowMarkup(rows) + '</div>');
   }
@@ -87,7 +91,8 @@ export function build(ctx) {
     const row = need(classRows(ctx.state, snapshot).find(item => item.id === id), "找不到该学生。");
     person = id;
     const pending = row.entries.filter(item => item.state === "pending");
-    ctx.show(row.name + " · 打卡详情", tag(row.status) + keys([["学号", row.id], ["班级", row.group],
+    ctx.show(row.name + " · 打卡详情", tag(row.status) + keys([
+      [isRosterReference(row.id) ? "本次名单编号" : "学号", visibleId(row.id)], ["班级", row.group],
       ...receiptKeys(row.record)]) + pending.map(item => '<div class="note warn"><strong>待核验</strong><p>'
         + escape(item.issue) + '</p>' + keys([["回执姓名", item.record.name], ...receiptKeys(item.record)])
         + '<div class="actions">' + button("采纳回执", "accept", "secondary compact", item.record.id)
@@ -171,7 +176,10 @@ export function build(ctx) {
     csv() {
       const {task, snapshot} = context();
       need(task && snapshot, "请先导入任务和应报名单。");
-      return ctx.csv(task.title + "-" + snapshot.group + "-打卡明细", serializeDetails(classRows(ctx.state, snapshot), task.title));
+      const rows = classRows(ctx.state, snapshot);
+      const column = rows.some(row => isRosterReference(row.id)) ? "本次名单编号" : "学号";
+      const details = serializeDetails(rows.map(row => ({...row, id: visibleId(row.id)})), task.title, column);
+      return ctx.csv(task.title + "-" + snapshot.group + "-打卡明细", details);
     },
     async statistics() {
       const {task, snapshot} = context();

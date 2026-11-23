@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from ipaddress import ip_address
 import json
 import mimetypes
 from pathlib import Path
@@ -152,7 +153,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def limits(self, db, username):
         window = int(time.time()) // WINDOW
-        address = self.headers.get("X-Real-IP", self.client_address[0])[:80]
+        address = self.client_address[0]
+        if self.server.trust_proxy_ip:
+            try:
+                address = str(ip_address(self.headers.get("X-Real-IP", "")))
+            except ValueError:
+                pass
         scopes = [("ip:" + address, 600), ("name:" + username, 40), ("pair:" + address + ":" + username, 8)]
         limited = False
         with db:
@@ -238,16 +244,17 @@ class Handler(BaseHTTPRequestHandler):
                     db.execute("DELETE FROM sessions WHERE hash=?", (hashed,))
                 return 204, None
             if path == "/tasks" and method == "GET":
-                return 200, task_service.feed(db, account, query)
+                return 200, task_service.feed(db, account, query, self.server.reference_key)
             if path == "/tasks" and method == "POST":
                 if account["role"] != "admin":
                     raise RequestError(403, "仅管理员可发布点名任务。")
-                return 201, task_service.publish(db, account, self.body(1_000_000), now_iso())
+                return 201, task_service.publish(db, account, self.body(1_000_000), now_iso(), self.server.reference_key)
             task_action = re.fullmatch(r"/tasks/([a-zA-Z0-9_-]{1,80})/(extend|revoke)", path)
             if task_action and method == "POST":
                 if account["role"] != "admin":
                     raise RequestError(403, "仅管理员可更改点名任务。")
-                return 200, task_service.update(db, account, task_action.group(1), task_action.group(2), self.body(), now_iso())
+                return 200, task_service.update(db, account, task_action.group(1), task_action.group(2), self.body(),
+                                                now_iso(), self.server.reference_key)
             submission = re.fullmatch(r"/tasks/([a-zA-Z0-9_-]{1,80})/(attendance|away)", path)
             if submission and method == "POST":
                 if account["role"] != "student":
@@ -327,6 +334,8 @@ def main():
     parser.add_argument("--db", required=True, type=Path)
     parser.add_argument("--pepper-file", required=True, type=Path)
     parser.add_argument("--origin", action="append", default=[])
+    parser.add_argument("--trust-proxy-ip", action="store_true",
+                        help="Only use behind a trusted local proxy that always overwrites X-Real-IP.")
     parser.add_argument("--site-dir", type=Path)
     args = parser.parse_args()
     pepper = args.pepper_file.read_bytes()
@@ -336,6 +345,8 @@ def main():
     with Server(("127.0.0.1", args.port), Handler) as server:
         server.database = args.db
         server.pepper = pepper
+        server.reference_key = hmac.digest(pepper, b"attendance-roster-key:v1", "sha256")
+        server.trust_proxy_ip = args.trust_proxy_ip
         server.site_dir = args.site_dir
         server.origins = set(args.origin)
         if args.site_dir:

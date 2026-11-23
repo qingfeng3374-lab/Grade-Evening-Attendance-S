@@ -1,4 +1,4 @@
-import {need, validatePerson} from "./model.mjs";
+import {need, validatePerson} from "./model.mjs?v=10";
 
 const roles = ["student", "leader", "admin"];
 const sessionKey = "upc-attendance-online-session-v1";
@@ -60,12 +60,14 @@ function verifiedProfile(profile) {
   return profile;
 }
 
-export async function authenticate(username, password) {
+export async function authenticate(username, password, sharedDevice = false) {
   need(username.trim() && password, "请输入用户名和密码。");
   const data = await fetchAPI("/login", {method: "POST", body: {username, password}});
   const profile = verifiedProfile(data.profile);
   need(/^[a-f0-9]{64}$/.test(data.token) && data.expires > Date.now(), "无法建立登录会话。");
-  sessionStorage.setItem(sessionKey, JSON.stringify({token: data.token, expires: data.expires, marker: crypto.randomUUID()}));
+  sessionStorage.setItem(sessionKey, JSON.stringify({
+    token: data.token, expires: data.expires, marker: crypto.randomUUID(), sharedDevice,
+  }));
   return profile;
 }
 
@@ -79,7 +81,7 @@ export async function signedIn() {
   try {
     const {profile} = await fetchAPI("/session", {token: session.token});
     const verified = verifiedProfile(profile);
-    return {profile: verified, marker: verified.directoryVersion, token: session.marker};
+    return {profile: verified, marker: verified.directoryVersion, token: session.marker, sharedDevice: session.sharedDevice === true};
   } catch (error) {
     if (error.status !== 401) throw error;
     sessionStorage.removeItem(sessionKey);

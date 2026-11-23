@@ -183,6 +183,13 @@ try {
   assert.deepEqual(studentTasks[0].snapshots, []);
   assert.deepEqual(leaderTasks.map(item => item.task.id), [task.id]);
   assert.deepEqual(leaderTasks[0].snapshots.map(snapshot => snapshot.group), ["测试2401"]);
+  const leaderStudents = leaderTasks[0].snapshots[0].students;
+  const [firstReference, secondReference] = leaderStudents.map(student => student.id);
+  assert.deepEqual(leaderStudents.map(student => student.name), ["测试甲", "测试乙"]);
+  for (const reference of [firstReference, secondReference]) assert.match(reference, /^ref_[a-f0-9]{32}$/);
+  assert.notEqual(firstReference, secondReference);
+  assert.deepEqual(published.snapshots[0].students.map(student => [student.id, student.reportRef]),
+    [["001", firstReference], ["002", secondReference]]);
   await includes(leader.locator("#student-rows"), "测试甲");
   await includes(student, "多设备验收任务");
   await includes(student, "填报会自动使用以上学籍信息。");
@@ -200,6 +207,7 @@ try {
   await click(leader, "关闭");
   await student.goto(url);
   await student.getByRole("dialog").waitFor();
+  await includes(student.getByRole("dialog"), "提交本次坐标和精度");
   await student.getByRole("button", {name: /^是，我在校/}).click();
   await includes(student.getByRole("dialog"), "在校打卡成功");
   const libraryLocation = "唐岛湾校区 · 图书馆总馆附近";
@@ -228,7 +236,9 @@ try {
     }});
   });
   const away = await pageAt(awayBrowser, "login.html");
+  await away.getByRole("checkbox", {name: /共享设备/}).check();
   await login(away, "student", "测试乙", "002");
+  assert.deepEqual(await away.evaluate(() => indexedDB.databases()), []);
   await click(away, "去填报");
   const awayDialog = away.getByRole("dialog");
   const onsite = awayDialog.getByRole("button", {name: /^是，我在校/});
@@ -259,6 +269,8 @@ try {
   assert.equal(onlineAway.reason, "在外参加活动\n次日返校。");
   assert.deepEqual((await (await callTasks(student, feedQuery)).json()).attendance.items, [record]);
   assert.deepEqual((await (await callTasks(away, feedQuery)).json()).attendance.items, [onlineAway]);
+  assert.deepEqual((await (await callTasks(leader, feedQuery)).json()).attendance.items,
+    [{...record, studentId: firstReference}, {...onlineAway, studentId: secondReference}]);
   const otherLogin = await fetch(base + "/api/login", {method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({username: "测试丙", password: "003"})});
   const {token: otherToken} = await otherLogin.json();
@@ -297,19 +309,22 @@ try {
   await away.reload();
   await click(away, "查看");
   await includes(awayDialog, "离校报备已提交");
+  assert.deepEqual(await away.evaluate(() => indexedDB.databases()), []);
 
-  await leader.getByLabel("查找学生").fill("001");
+  await leader.getByLabel("查找学生").fill("测试甲");
   await click(leader, "详情");
   await includes(leader.getByRole("dialog"), libraryLocation);
   await leader.getByRole("dialog").screenshot({path: path.join(artifacts, "guide-leader.png")});
   await click(leader, "关闭");
-  await leader.getByLabel("查找学生").fill("002");
+  const displayedReference = secondReference.slice(4, 16).toUpperCase();
+  await leader.getByLabel("查找学生").fill(displayedReference);
   await click(leader, "详情");
   await includes(leader.getByRole("dialog"), "在外参加活动");
   await click(leader, "关闭");
   const classCSV = await download(leader, "导出本班 CSV");
   const leaderExport = await fs.readFile(classCSV, "utf8");
-  assert.match(leaderExport, /"002","离校报备"/);
+  assert.ok(leaderExport.includes('"本次名单编号"') && leaderExport.includes('"' + displayedReference + '","离校报备"'));
+  assert.doesNotMatch(leaderExport, /"00[12]"/);
   assert.ok(leaderExport.includes(libraryLocation));
   await leader.evaluate(() => {
     window.showSaveFilePicker = async options => ({async createWritable() {
@@ -321,7 +336,7 @@ try {
   await leader.waitForFunction(() => window.savedExport);
   const localExport = await leader.evaluate(() => window.savedExport);
   assert.match(localExport.name, /\.csv$/);
-  assert.match(localExport.data, /"002","离校报备"/);
+  assert.ok(localExport.data.includes('"' + displayedReference + '","离校报备"'));
   await leader.evaluate(() => { window.showSaveFilePicker = undefined; });
   await includes(leader, "本班报备分布");
   await click(leader, "报送特殊情况");
@@ -335,6 +350,8 @@ try {
   await includes(admin.getByRole("dialog"), "已核对本班回执。");
   await click(admin, "关闭");
   const reportFile = await download(leader, "导出班级统计");
+  assert.deepEqual(JSON.parse(await fs.readFile(reportFile, "utf8")).data.rows.map(row => row.id),
+    [firstReference, secondReference]);
   await upload(admin, "导入历史统计", reportFile);
   await includes(admin, "全年级打卡总览");
   assert.equal(await admin.getByText("未报送", {exact: true}).count(), 0);
