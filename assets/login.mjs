@@ -32,8 +32,7 @@ form.addEventListener("submit", async event => {
   submit.textContent = "正在登录…";
   try {
     if (!isSecureContext || !crypto.subtle) throw new Error("请在 HTTPS 或本机预览地址打开后登录。");
-    const file = document.querySelector("#account-file").files[0];
-    const account = await authenticate(username.value, password.value, file);
+    const account = await authenticate(username.value, password.value);
     password.value = "";
     forward(account);
   } catch (error) {
@@ -45,6 +44,11 @@ form.addEventListener("submit", async event => {
   }
 });
 
-const current = await signedIn();
-if (current) forward(current.profile);
-else submit.disabled = false;
+try {
+  const current = await signedIn();
+  if (current) forward(current.profile);
+  else submit.disabled = false;
+} catch (error) {
+  showError(error.message);
+  submit.disabled = false;
+}

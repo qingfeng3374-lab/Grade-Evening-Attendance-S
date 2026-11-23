@@ -24,25 +24,6 @@
 .password-row { position: relative; }
 .password-row input { padding-inline-end: 4.4rem !important; }
 .password-row .button { position: absolute; inset: 1px 1px 1px auto; min-height: 0; }
-.enrollment {
-  margin-top: .85rem;
-  padding: .7rem .75rem;
-  background: var(--wash);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-}
-.enrollment-label { font-size: .88rem; font-weight: 700; }
-.enrollment input { width: 100%; margin-top: .45rem; font-size: .81rem; }
-.enrollment input::file-selector-button {
-  border: 1px solid #bdccda;
-  border-radius: 5px;
-  padding: .35rem .6rem;
-  margin-inline-end: .5rem;
-  background: white;
-  color: var(--blue);
-  font: inherit;
-  cursor: pointer;
-}
 .login-button { width: 100%; margin-top: .85rem; }
 @media (max-width: 700px) {
   .login-layout { grid-template-columns: 1fr; gap: 11px; margin-block: 15px 25px; }

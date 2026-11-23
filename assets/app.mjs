@@ -151,8 +151,19 @@ async function shareText(text, source) {
 }
 
 const ctx = {
-  role, demo, ui, get state() { return workspace; },
+  role, demo, online: !demo, ui, get state() { return workspace; },
   get account() { return session?.profile ?? null; },
+  async request(path, options) {
+    try {
+      return await auth.request(path, options);
+    } catch (error) {
+      if (error.status === 401) {
+        auth.signOut();
+        leave();
+      }
+      throw error;
+    }
+  },
   root, dialog, draw, edit, show, close, toast, pick, read, json, csv, shareText,
 };
 
@@ -301,7 +312,7 @@ document.addEventListener("submit", async event => {
 document.addEventListener("input", event => { screen?.input?.(event.target); });
 document.addEventListener("change", event => { screen?.change?.(event.target); });
 
-init().catch(() => {
+init().catch(error => {
   root.innerHTML = '<div class="error-block"><h1>' + roleNames[role]
-    + '暂时无法打开</h1><p>请在支持本地存储的浏览器中打开 HTTPS 网址，然后刷新页面。</p></div>';
+    + '暂时无法打开</h1><p>' + escape(error.message) + '</p><div class="actions"><a class="button secondary" href="./login.html">返回登录</a></div></div>';
 });

@@ -1,4 +1,4 @@
-import {displayTime, statuses} from "./model.mjs";
+import {displayTime, rate, statuses} from "./model.mjs";
 
 export const escape = value => String(value ?? "").replace(/[&<>"']/g, char =>
   ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[char]);
@@ -51,6 +51,22 @@ export function taskCard(task, condition, action, selected = false, extra = "") 
 export function stats(items) {
   return '<dl class="stats">' + items.map(([name, count]) => '<div class="stat"><dt>'
     + escape(name) + '</dt><dd>' + escape(count) + '</dd></div>').join("") + '</dl>';
+}
+
+export function distribution(counts, title) {
+  const groups = ["present", "away", "pending", "missing"];
+  const segments = groups.filter(key => counts[key] > 0).map(key =>
+    '<span class="segment ' + key + '" style="--share:' + (counts[key] / counts.total) + '"></span>').join("");
+  return '<figure class="metric-chart"><figcaption>' + escape(title) + '</figcaption>'
+    + '<div class="segment-track" aria-hidden="true">' + segments + '</div>'
+    + '<ul class="chart-legend">' + groups.map(key => '<li><span class="swatch ' + key + '" aria-hidden="true"></span>'
+      + statuses[key][0] + ' <strong>' + counts[key] + '</strong></li>').join("") + '</ul></figure>';
+}
+
+export function completionBar(counts, label) {
+  return '<div class="class-progress"><progress class="progress" aria-label="' + escape(label)
+    + '" max="' + (counts.total || 1) + '" value="' + counts.done + '"></progress><strong>'
+    + rate(counts.done, counts.total) + '</strong></div>';
 }
 
 export function keys(items) {

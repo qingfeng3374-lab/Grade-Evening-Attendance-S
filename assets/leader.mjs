@@ -1,7 +1,7 @@
-import {archived, classRoster, classRows, displayTime, field, importReceipt, importRoster, importTask, need, newId,
+import {archived, classRoster, classRows, cleanException, displayTime, field, importReceipt, importRoster, importTask, need, newId,
   rate, recordImport, reportRows, resolveReceipt, statusOf, summarize, unpack} from "./model.mjs";
 import {area, button, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys, select,
-  serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs";
+  distribution, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs";
 
 const pageSize = 15;
 const filterItems = [["", "全部状态"], ["missing", "未提交"], ["present", "在校打卡"], ["away", "离校报备"], ["pending", "待核验"]];
@@ -9,7 +9,6 @@ const filterItems = [["", "全部状态"], ["missing", "未提交"], ["present",
 export function build(ctx) {
   const ui = ctx.ui;
   let prepared = [];
-  let reportTarget;
   let person;
 
   function context() {
@@ -51,11 +50,11 @@ export function build(ctx) {
       + '<span class="meta">截止 ' + escape(displayTime(task.due)) + '</span></div>'
       + stats([["应报", c.total], ["在校打卡", c.present], ["离校报备", c.away], ["未提交", c.missing]])
       + '<p class="meta">完成报备率 <strong>' + rate(c.done, c.total) + '</strong> · 在校打卡率 ' + rate(c.present, c.total)
-      + ' · 待核验 ' + c.pending + '</p><progress class="progress" aria-label="完成报备进度" max="' + (c.total || 1)
-      + '" value="' + c.done + '"></progress>'
+      + ' · 待核验 ' + c.pending + '</p>' + distribution(c, "本班报备分布")
       + '<div class="actions">' + (task.current === "active" ? button("提醒", "remind", "secondary") : "")
-      + button("导出本班 CSV", "csv", "secondary") + (task.mode !== "revoked" ? button("报送管理员", "report") : "") + '</div>'
-      + (last ? '<p class="tiny">上次生成报送包 ' + escape(displayTime(last.createdAt)) + ' · 第 ' + last.version + ' 版</p>' : "")
+      + button("导出本班 CSV", "csv", "secondary") + (task.mode !== "revoked" ? button("导出班级统计", "statistics", "secondary") : "")
+      + button("报送特殊情况", "exception") + '</div>'
+      + (last ? '<p class="tiny">上次生成班级统计 ' + escape(displayTime(last.createdAt)) + ' · 第 ' + last.version + ' 版</p>' : "")
       + '<div class="filters">' + input("search", "查找学生", ui.search, 'type="search" placeholder="姓名或学号" autocomplete="off"')
       + select("filter", "状态", filterItems, ui.filter ?? "") + '</div><div class="rows" id="student-rows" aria-live="polite">'
       + rowMarkup(rows) + '</div>');
@@ -63,7 +62,7 @@ export function build(ctx) {
 
   function render() {
     const {groups, tasks, task, snapshot} = context();
-    const aside = panel("报送流程", '<ol class="side-rule"><li>导入管理员发来的任务及本班应报名单。</li><li>批量导入学生私发的回执，核对异常。</li><li>生成班级报送包，私发管理员。</li></ol>', "", "soft");
+    const aside = panel("操作指南", '<ol class="side-rule"><li>导入任务、本班名单和学生回执。</li><li>导出班级统计，供年级汇总。</li><li>需要管理员处理时，报送特殊情况。</li></ol>', "", "soft");
     const classChoice = groups.length > 1 ? select("group", "当前班级", groups.map(group => [group, group]), ui.group) : "";
     const cards = tasks.length ? '<div class="mobile-task-switch">' + select("task-switch", "切换任务", tasks.map(item => [item.id, item.title]), task.id)
       + '</div><div class="task-list desktop-task-list">' + tasks.map(item => taskCard(item, item.current,
@@ -167,15 +166,29 @@ export function build(ctx) {
       need(task && snapshot, "请先导入任务和应报名单。");
       ctx.csv(task.title + "-" + snapshot.group + "-打卡明细", serializeDetails(classRows(ctx.state, snapshot), task.title));
     },
-    report() {
+    async statistics() {
       const {task, snapshot} = context();
-      need(task && snapshot && task.mode !== "revoked", "当前任务无法报送。");
-      reportTarget = {taskId: task.id, group: snapshot.group};
-      const counts = summarize(classRows(ctx.state, snapshot));
-      ctx.show("报送管理员", form("report", keys([["任务", task.title], ["班级", snapshot.group],
-        ["应报 / 已完成", counts.total + " / " + counts.done], ["待核验", counts.pending]])
-        + area("note", "班级情况说明（可选）", "", 'maxlength="1200"')
-        + '<p class="meta">下载文件后，私发给管理员导入。</p><div class="actions">' + submit("生成报送包") + '</div>'));
+      need(task && snapshot && task.mode !== "revoked", "当前任务无法导出统计。");
+      let output;
+      await ctx.edit(state => {
+        const current = need(state.tasks.find(item => item.id === task.id && item.mode !== "revoked"), "任务已不可汇总。");
+        const group = need(classRoster(state, current.id, snapshot.group), "应报名单已不可用。");
+        const previous = state.sentReports.find(item => item.taskId === task.id && item.group === group.group);
+        output = {id: newId(), taskId: task.id, group: group.group, version: (previous?.version ?? 0) + 1,
+          createdAt: new Date().toISOString(), rows: reportRows(classRows(state, group))};
+        state.sentReports = state.sentReports.filter(item => item.taskId !== task.id || item.group !== group.group);
+        state.sentReports.push(output);
+      });
+      ctx.json("晚点名班级统计-" + snapshot.group + "-v" + output.version, "statistics", output);
+      ctx.toast("班级统计已下载，请发给管理员汇总。");
+    },
+    exception() {
+      const {task, snapshot} = context();
+      need(task && snapshot, "请先导入任务及本班名单。");
+      ctx.show("报送特殊情况", form("exception", keys([["任务", task.title], ["班级", snapshot.group]])
+        + input("title", "标题", "", 'required maxlength="80" placeholder="例如 学生定位异常"')
+        + area("note", "情况说明", "", 'required maxlength="1200"')
+        + '<div class="actions">' + submit(ctx.online ? "发送到特殊情况邮箱" : "下载特殊情况文件") + '</div>', newId()));
     },
     async accept(id) {
       await ctx.edit(state => resolveReceipt(state, id, true));
@@ -199,23 +212,18 @@ export function build(ctx) {
       const count = results.filter(item => item.ok).length;
       ctx.toast("已处理 " + count + " 份文件" + (count < results.length ? "，其余文件请按预览提示修正。" : "。"));
     },
-    async report(data) {
-      const {taskId, group} = reportTarget;
-      const noteValue = String(data.get("note") ?? "").trim();
-      if (noteValue) field(noteValue, "情况说明", 1200);
-      let created;
-      await ctx.edit(state => {
-        const snapshot = need(classRoster(state, taskId, group), "本班应报名单已不可用。");
-        const task = need(state.tasks.find(item => item.id === taskId && item.mode !== "revoked"), "任务已不可报送。");
-        const previous = state.sentReports.find(item => item.taskId === task.id && item.group === group);
-        created = {id: newId(), taskId, group, version: (previous?.version ?? 0) + 1, createdAt: new Date().toISOString(),
-          note: noteValue, rows: reportRows(classRows(state, snapshot))};
-        state.sentReports = state.sentReports.filter(item => item.taskId !== taskId || item.group !== group);
-        state.sentReports.push(created);
-      });
-      ctx.json("晚点名报送-" + group + "-v" + created.version, "report", created);
+    async exception(data, id) {
+      const {task, snapshot} = context();
+      need(task && snapshot, "任务或本班名单已不可用。");
+      const exception = cleanException(ctx.state, {id, taskId: task.id, group: snapshot.group,
+        createdAt: new Date().toISOString(), title: data.get("title"), note: data.get("note")});
+      if (ctx.online) {
+        await ctx.request("/special", {method: "POST", body: {...exception, taskTitle: task.title}});
+      } else {
+        ctx.json("晚点名特殊情况-" + exception.group + "-" + exception.id.slice(0, 8), "exception", exception);
+      }
       ctx.close();
-      ctx.toast("报送包已生成，请私发给管理员。");
+      ctx.toast(ctx.online ? "已发送到管理员的特殊情况邮箱。" : "特殊情况文件已下载，请发给管理员导入。");
     },
   }, input(control) {
     if (control.name === "search") {

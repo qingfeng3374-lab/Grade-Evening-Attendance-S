@@ -1,14 +1,15 @@
-import {adminRows, archived, beijingInput, classRoster, cleanTask, displayTime, field, importReport, need, newId, parseCSV, rate,
+import {adminRows, archived, beijingInput, classRoster, cleanTask, displayTime, field, importException, importReport, need, newId, parseCSV, rate,
   readBeijing, recordImport, statusOf, summarize, unpack} from "./model.mjs";
 import {campusNames, validateFence} from "./geo.mjs";
 import {area, button, checklist, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys,
-  select, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs";
+  completionBar, distribution, select, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs";
 
 export function build(ctx) {
   const ui = ctx.ui;
   let listPreview;
   let reportFiles = [];
   let detailGroup;
+  let onlineMessages = [];
 
   const groups = () => [...new Set(ctx.state.roster.map(person => person.group))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const taskFor = id => need(ctx.state.tasks.find(task => task.id === id), "找不到任务。");
@@ -34,27 +35,45 @@ export function build(ctx) {
     }
     const classes = classData(task);
     const seen = classes.filter(item => item.item);
-    const coverage = seen.length === classes.length ? "全年级完成率" : "已报送范围完成率";
+    const coverage = seen.length === classes.length ? "全年级完成率" : "汇总范围完成率";
     const total = seen.reduce((sum, row) => sum + row.counts.total, 0);
     const done = seen.reduce((sum, row) => sum + row.counts.done, 0);
     const last = seen.map(row => row.item.receivedAt).sort().at(-1);
     const status = statusOf(task);
-    const rows = classes.map(row => '<article class="list-row"><div><strong>' + escape(row.group)
-      + '</strong><p class="tiny">' + (row.item
-        ? "应报 " + row.counts.total + " · 在校 " + row.counts.present + " · 离校 " + row.counts.away + " · 未提交 " + row.counts.missing
-        : "应报 " + row.counts.total + " · 等待班级报送") + '</p>'
-      + (row.item ? '<p class="tiny">导入 ' + escape(displayTime(row.item.receivedAt)) + '</p>' : '') + '</div><div class="actions">'
-      + tag(row.item ? "完成 " + rate(row.counts.done, row.counts.total) : "未报送")
-      + (row.item ? button("详情", "group-detail", "quiet compact", row.group) : "") + '</div></article>').join("");
+    const rows = seen.map(row => '<article class="list-row"><div><strong>' + escape(row.group)
+      + '</strong><p class="tiny">应报 ' + row.counts.total + ' · 已完成 ' + row.counts.done + '</p>'
+      + completionBar(row.counts, row.group + "完成报备率") + '</div>'
+      + button("详情", "group-detail", "quiet compact", row.group) + '</article>').join("");
     return panel(task.title, '<div class="actions">' + tag(status) + '<span class="meta">截止 ' + escape(displayTime(task.due)) + '</span></div>'
-      + stats([["已报送班级", seen.length + "/" + classes.length], ["应报人数", classes.reduce((sum, row) => sum + row.counts.total, 0)],
+      + stats([["已汇总班级", seen.length + "/" + classes.length], ["应报人数", classes.reduce((sum, row) => sum + row.counts.total, 0)],
         ["已完成报备", done], [coverage, rate(done, total)]])
-      + '<p class="meta">最新导入 ' + escape(displayTime(last)) + ' · 北京时间</p>'
+      + (seen.length ? distribution(summarize(seen.flatMap(row => row.rows)), "已汇总班级报备分布")
+        + '<p class="meta">最新导入 ' + escape(displayTime(last)) + ' · 北京时间</p>' : '<p class="meta">导入班级统计后显示完成率和分布。</p>')
       + '<div class="actions">' + button("下载发布文件", "downloads", "secondary", task.id)
       + (status !== "revoked" ? button("延长截止", "extend", "secondary", task.id)
         + button("撤销任务", "revoke", "danger", task.id) : "") + '</div>'
       + '<div class="actions">' + button("导出年级汇总", "csv-summary", "secondary")
       + button("导出学生明细", "csv-detail", "secondary") + '</div><div class="rows">' + rows + '</div>');
+  }
+
+  function inboxMessages() {
+    const messages = new Map((ctx.state.exceptions ?? []).map(item => [item.id, item]));
+    for (const item of onlineMessages) messages.set(item.id, item);
+    return [...messages.values()].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+  }
+
+  function inbox() {
+    const messages = inboxMessages();
+    const unread = messages.filter(item => !item.readAt).length;
+    const entries = messages.slice(0, 6).map(item => '<article class="list-row"><div><strong>' + escape(item.title)
+      + '</strong><p class="tiny">' + escape(item.group + ' · ' + displayTime(item.receivedAt))
+      + '</p></div><div class="actions">' + (item.readAt ? "" : tag("未读"))
+      + button("查看", "open-message", "quiet compact", item.id) + '</div></article>').join("");
+    const controls = ctx.online ? button("刷新邮箱", "refresh-inbox", "secondary compact")
+      : button("导入特殊情况", "import-exception", "secondary compact");
+    return panel("特殊情况邮箱", '<div class="actions">' + controls + (unread ? tag(unread + " 条未读") : "") + '</div>'
+      + (entries ? '<div class="rows">' + entries + '</div>' : '<p class="meta">暂无特殊情况。</p>')
+      + (messages.length > 6 ? '<div class="actions">' + button("查看全部", "all-messages", "quiet compact") + '</div>' : ""));
   }
 
   function sortedTasks() {
@@ -77,15 +96,15 @@ export function build(ctx) {
         + '</strong><p class="tiny">周边 ' + item.buffer + ' 米 · 误差上限 ' + item.maxAccuracy + ' 米</p></div>'
         + button("编辑", "fence", "quiet compact", item.name) + '</div>').join("") + '</div>'
       : '<p class="meta">发布前请导入经核实的校园范围。</p>';
-    const aside = panel("名单维护", roster) + panel("打卡范围", fences + '<div class="actions">'
+    const aside = inbox() + panel("名单维护", roster) + panel("打卡范围", fences + '<div class="actions">'
       + button("配置校区围栏", "fence", "secondary") + '</div>');
     const cards = tasks.length ? '<div class="mobile-task-switch">' + select("task-switch", "切换任务", tasks.map(item => [item.id, item.title]), task.id)
       + '</div><div class="task-list desktop-task-list">' + tasks.map(item => taskCard(item, item.current,
       button(task?.id === item.id ? "当前查看" : "详情", "task", "secondary", item.id), task?.id === item.id,
       item.mode === "draft" ? "" : item.groups.length + " 个班级 · 版本 " + item.revision)).join("") + '</div>'
       : empty("暂无晚点名任务", "导入学籍并配置校园围栏后，即可发布任务。", button("新建任务", "edit-task", "secondary"));
-    return hero("晚点名管理", "发布晚点名任务，查看班级报送与年级进度。",
-      button("新建任务", "edit-task", "light") + button("导入班级报送", "import", "outline-light"))
+    return hero("晚点名管理", "发布晚点名任务，查看年级进度与特殊情况。",
+      button("新建任务", "edit-task", "light") + button("导入班级统计", "import", "outline-light") + button("特殊情况邮箱", "all-messages", "outline-light"))
       + layout(panel("点名任务", cards, "", "task-switch-panel") + renderBoard(task), aside);
   }
 
@@ -121,7 +140,7 @@ export function build(ctx) {
   function applyReports(state, items) {
     return items.map(item => {
       if (item.error) return {name: item.name, text: item.error};
-      try { return {name: item.name, text: importReport(state, item.data), ok: true}; }
+      try { return {name: item.name, text: item.type === "exception" ? importException(state, item.data) : importReport(state, item.data), ok: true}; }
       catch (error) { return {name: item.name, text: error.message}; }
     });
   }
@@ -141,7 +160,7 @@ export function build(ctx) {
 
   function currentGroup(group) {
     const task = taskFor(ui.task);
-    return need(classData(task).find(item => item.group === group && item.item), "该班还没有报送。");
+    return need(classData(task).find(item => item.group === group && item.item), "该班还没有统计数据。");
   }
 
   function classDetail(group, page = 0) {
@@ -149,19 +168,55 @@ export function build(ctx) {
     const item = currentGroup(group);
     const c = item.counts;
     const maxPage = Math.max(0, Math.ceil(item.rows.length / 15) - 1);
-    const contents = keys([["情况说明", item.item.report.note || "—"], ["报送时间", displayTime(item.item.report.createdAt)],
+    const contents = keys([["生成时间", displayTime(item.item.report.createdAt)],
       ["最近导入", displayTime(item.item.receivedAt)], ["应报 / 已完成", c.total + " / " + c.done],
       ["在校 / 离校", c.present + " / " + c.away], ["未提交 / 待核验", c.missing + " / " + c.pending]])
       + '<div class="rows">' + item.rows.slice(page * 15, (page + 1) * 15).map(row =>
         '<article class="list-row"><div><strong>' + escape(row.name) + '</strong><p class="tiny">' + escape(row.id)
         + '</p></div><div class="actions">' + tag(row.status)
         + (row.record ? button("回执", "row-detail", "quiet compact", row.id) : "") + '</div></article>').join("") + '</div>';
-    ctx.show(group + " · 报送详情", contents + (maxPage > 0 ? '<div class="actions"><span class="meta">第 ' + (page + 1)
+    ctx.show(group + " · 统计详情", contents + (maxPage > 0 ? '<div class="actions"><span class="meta">第 ' + (page + 1)
       + ' / ' + (maxPage + 1) + ' 页</span>' + (page > 0 ? button("上一页", "class-page", "secondary", page - 1) : "")
       + (page < maxPage ? button("下一页", "class-page", "secondary", page + 1) : "") + '</div>' : ""));
   }
 
-  return {render, actions: {
+  async function refreshInbox({quiet = false} = {}) {
+    if (!ctx.online) return;
+    try {
+      const {messages} = await ctx.request("/special");
+      if (JSON.stringify(messages) !== JSON.stringify(onlineMessages)) {
+        onlineMessages = messages;
+        ctx.draw();
+      }
+    } catch (error) {
+      if (!quiet) ctx.toast(error.message, true);
+    }
+  }
+
+  async function openImport(type, heading) {
+    const files = await ctx.pick(".json,application/json", true);
+    if (!files.length) return;
+    need(files.length <= 100, "每批最多导入 100 份文件。");
+    reportFiles = [];
+    for (const file of files) {
+      try { reportFiles.push({...unpack(await ctx.read(file), type, ctx.demo), name: file.name}); }
+      catch (error) { reportFiles.push({name: file.name, error: error.message}); }
+    }
+    const results = applyReports(structuredClone(ctx.state), reportFiles);
+    const items = '<div class="rows">' + results.map(item => '<div class="list-row"><div><strong>' + escape(item.name)
+      + '</strong><p class="meta">' + escape(item.text) + '</p></div>' + tag(item.ok ? "可导入" : "需处理")
+      + '</div>').join("") + '</div>';
+    ctx.show(heading, results.some(item => item.ok) ? form("import", items + '<div class="actions">'
+      + submit("确认导入") + '</div>') : items);
+  }
+
+  return {render, start() {
+    if (!ctx.online) return;
+    void refreshInbox();
+    setInterval(() => {
+      if (document.visibilityState === "visible" && !ctx.dialog.open) void refreshInbox({quiet: true});
+    }, 30000);
+  }, actions: {
     task(id) { ui.task = id; ctx.draw(); },
     "edit-task"(id) { taskEdit(id); },
     "restore-task"() {
@@ -202,21 +257,33 @@ export function build(ctx) {
       ctx.show("撤销任务", form("revoke", note("撤销「" + task.title + "」后保留已导入的数据。请将撤销通知转发给学生和负责人。", true)
         + '<div class="actions">' + submit("确认撤销", "danger") + '</div>', id));
     },
-    async import() {
-      const files = await ctx.pick(".json,application/json", true);
-      if (!files.length) return;
-      need(files.length <= 100, "每批最多导入 100 份文件。");
-      reportFiles = [];
-      for (const file of files) {
-        try { reportFiles.push({...unpack(await ctx.read(file), "report", ctx.demo), name: file.name}); }
-        catch (error) { reportFiles.push({name: file.name, error: error.message}); }
+    import() { return openImport(["statistics", "report"], "班级统计导入预览"); },
+    "import-exception"() { return openImport("exception", "特殊情况导入预览"); },
+    "refresh-inbox": refreshInbox,
+    async "all-messages"() {
+      await refreshInbox();
+      const messages = inboxMessages();
+      ctx.show("特殊情况邮箱", messages.length ? '<div class="rows">' + messages.map(item => '<div class="list-row"><div><strong>'
+        + escape(item.title) + '</strong><p class="tiny">' + escape(item.group + ' · ' + displayTime(item.receivedAt))
+        + '</p></div>' + button(item.readAt ? "查看" : "读消息", "open-message", "secondary compact", item.id) + '</div>').join("") + '</div>'
+        : '<p class="meta">暂无特殊情况。</p>');
+    },
+    async "open-message"(id) {
+      const item = need(inboxMessages().find(message => message.id === id), "找不到此消息。");
+      if (!item.readAt) {
+        if (onlineMessages.some(message => message.id === id)) {
+          item.readAt = (await ctx.request("/special/" + encodeURIComponent(id) + "/read", {method: "POST"})).readAt;
+          ctx.draw();
+        } else await ctx.edit(state => {
+          const stored = state.exceptions.find(message => message.id === id);
+          stored.readAt ??= new Date().toISOString();
+        });
       }
-      const results = applyReports(structuredClone(ctx.state), reportFiles);
-      const items = '<div class="rows">' + results.map(item => '<div class="list-row"><div><strong>' + escape(item.name)
-        + '</strong><p class="meta">' + escape(item.text) + '</p></div>' + tag(item.ok ? "可导入" : "需处理")
-        + '</div>').join("") + '</div>';
-      ctx.show("班级报送导入预览", results.some(item => item.ok) ? form("import", items + '<div class="actions">'
-        + submit("确认导入") + '</div>') : items);
+      const task = ctx.state.tasks.find(entry => entry.id === item.taskId);
+      ctx.show(item.title, keys([["班级", item.group], ["任务", task?.title ?? item.taskTitle ?? item.taskId],
+        ["接收时间", displayTime(item.receivedAt)], ...(item.sender ? [["报送人", item.sender]] : [])])
+        + '<h3>情况说明</h3><p class="inbox-preview">' + escape(item.note) + '</p><div class="actions">'
+        + button("返回邮箱", "all-messages", "secondary") + '</div>');
     },
     "group-detail"(group) { classDetail(group); },
     "class-page"(page) { classDetail(detailGroup, Number(page)); },
@@ -228,19 +295,18 @@ export function build(ctx) {
     },
     "csv-summary"() {
       const task = taskFor(ui.task);
-      const data = classData(task);
-      const coverage = data.filter(item => item.item).length + "/" + data.length;
-      ctx.csv(task.title + "-年级汇总", [["任务", "班级", "报送状态", "应报", "在校", "离校", "未提交", "待核验", "完成报备率",
+      const classes = classData(task);
+      const data = classes.filter(item => item.item);
+      const coverage = data.length + "/" + classes.length;
+      ctx.csv(task.title + "-年级汇总", [["任务", "班级", "应报", "在校", "离校", "未提交", "待核验", "完成报备率",
         "在校打卡率", "导入时间（北京时间）", "班级覆盖率"],
-      ...data.map(({group, item, counts: c}) => [task.title, group, item ? "已报送" : "未报送", c.total,
-        ...(item ? [c.present, c.away, c.missing, c.pending, rate(c.done, c.total), rate(c.present, c.total),
-          displayTime(item.receivedAt)] : ["", "", "", "", "", "", ""]), coverage])]);
+      ...data.map(({group, item, counts: c}) => [task.title, group, c.total, c.present, c.away, c.missing, c.pending,
+        rate(c.done, c.total), rate(c.present, c.total), displayTime(item.receivedAt), coverage])]);
     },
     "csv-detail"() {
       const task = taskFor(ui.task);
-      const data = classData(task);
-      ctx.csv(task.title + "-学生明细", serializeDetails(data.flatMap(item => item.item ? item.rows
-        : item.rows.map(row => ({...row, status: "班级未报送"}))), task.title));
+      const data = classData(task).filter(item => item.item);
+      ctx.csv(task.title + "-学生明细", serializeDetails(data.flatMap(item => item.rows), task.title));
     },
   }, forms: {
     async list() {
@@ -344,10 +410,10 @@ export function build(ctx) {
       await ctx.edit(state => {
         results = applyReports(state, reportFiles);
         const count = results.filter(item => item.ok).length;
-        recordImport(state, "班级报送", "处理 " + count + " 份文件 · 需处理 " + (results.length - count) + " 份");
+        recordImport(state, "管理端导入", "处理 " + count + " 份文件 · 需处理 " + (results.length - count) + " 份");
       });
       ctx.close();
-      ctx.toast("已处理 " + results.filter(item => item.ok).length + " 份班级报送。");
+      ctx.toast("已处理 " + results.filter(item => item.ok).length + " 份文件。");
     },
   }, change(control) {
     if (control.name === "task-switch") { ui.task = control.value; ctx.draw(); }

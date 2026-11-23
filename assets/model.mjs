@@ -31,7 +31,7 @@ export function newId() {
 
 export function blank() {
   return {profile: null, roster: [], staff: [], fences: [], tasks: [], snapshots: [],
-    receipts: [], reports: [], sentReports: [], archives: [], imports: []};
+    receipts: [], reports: [], sentReports: [], exceptions: [], archives: [], imports: []};
 }
 
 export function recordImport(state, label, results) {
@@ -51,6 +51,7 @@ export function archiveTask(state, taskId) {
   state.receipts = state.receipts.filter(item => item.record.taskId !== taskId);
   state.reports = state.reports.filter(item => item.report.taskId !== taskId);
   state.sentReports = state.sentReports.filter(item => item.taskId !== taskId);
+  state.exceptions = (state.exceptions ?? []).filter(item => item.taskId !== taskId);
 }
 
 export function statusOf(task, now = Date.now()) {
@@ -277,22 +278,45 @@ export function importReport(state, raw, now = new Date().toISOString()) {
   const index = state.reports.findIndex(item => item.report.taskId === task.id && item.report.group === raw.group);
   if (index < 0) {
     state.reports.push({report, receivedAt: now});
-    return "已导入班级报送";
+    return "已导入班级统计";
   }
   const previous = state.reports[index].report;
-  if (previous.version > report.version) return "已保留较新班级报送";
+  if (previous.version > report.version) return "已保留较新班级统计";
   if (previous.version === report.version) {
     need(comparable(previous) === comparable(report), "同一报送版本的内容冲突。");
-    return "该班级报送已导入";
+    return "该班级统计已导入";
   }
   state.reports[index] = {report, receivedAt: now};
-  return "已更新班级报送";
+  return "已更新班级统计";
 }
 
 export function adminRows(snapshot, report) {
   const byId = new Map(report?.rows.map(row => [row.id, row]) ?? []);
   return snapshot.students.map(person => ({...person, status: byId.get(person.id)?.status ?? "missing",
     record: byId.get(person.id)?.record ?? null}));
+}
+
+export function cleanException(state, raw) {
+  need(validId(raw?.id) && validId(raw.taskId) && validTime(raw.createdAt), "特殊情况编号或时间无效。");
+  const task = need(state.tasks.find(item => item.id === raw.taskId && item.mode !== "draft"), "找不到报送对应的点名任务。");
+  need(!archived(state, task.id), "此任务的本机报备数据已清理。");
+  const group = field(raw.group, "班级", 50);
+  need(task.groups.includes(group), "该班级不在任务范围内。");
+  return {id: raw.id, taskId: task.id, group, createdAt: raw.createdAt,
+    title: field(raw.title, "特殊情况标题", 80), note: field(raw.note, "情况说明", 1200)};
+}
+
+export function importException(state, raw, now = new Date().toISOString()) {
+  const exception = cleanException(state, raw);
+  const messages = state.exceptions ??= [];
+  const existing = messages.find(item => item.id === exception.id);
+  if (existing) {
+    const {readAt, receivedAt, ...details} = existing;
+    need(comparable(details) === comparable(exception), "相同报送编号包含不同内容。");
+    return "特殊情况已在邮箱中";
+  }
+  messages.push({...exception, receivedAt: now, readAt: null});
+  return "已接收特殊情况";
 }
 
 export function parseCSV(text) {
