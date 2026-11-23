@@ -24,12 +24,13 @@ test("围栏内、外、孔洞、周边、边界误差与低精度各自判断",
 test("唐岛湾预设覆盖校内和门口，排除校外测点", () => {
   const feature = JSON.parse(readFileSync(new URL("../dist/assets/tangdaowan-boundary.geojson", import.meta.url), "utf8"));
   const actual = validateFence({name: feature.properties.name, version: feature.properties.version,
-    buffer: 20, maxAccuracy: 70, geometry: feature});
+    buffer: 30, maxAccuracy: 100, geometry: feature});
   const result = (longitude, latitude, accuracy) => judgePosition([actual], {longitude, latitude, accuracy});
   assert.equal(result(120.16533, 35.94322, 15).status, "pass");
   assert.equal(result(120.1757398, 35.9434644, 14).status, "pass");
   assert.equal(result(120.185, 35.946, 15).status, "outside");
-  assert.equal(result(120.1698165, 35.9430351, 71).status, "uncertain");
+  assert.equal(result(120.1698165, 35.9430351, 100).status, "pass");
+  assert.equal(result(120.1698165, 35.9430351, 101).status, "uncertain");
 });
 
 test("北京时间在不同时区保持一致，并拒绝无效日期", () => {

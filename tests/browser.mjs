@@ -170,7 +170,7 @@ try {
   const published = (await (await callTasks(admin)).json()).items[0];
   const task = published.task;
   assert.deepEqual(task.fences, [{name: "唐岛湾校区", version: defaultBoundary.properties.version,
-    buffer: 20, maxAccuracy: 70, geometry: defaultBoundary.geometry}]);
+    buffer: 30, maxAccuracy: 100, geometry: defaultBoundary.geometry}]);
   assert.deepEqual(task.groups, ["测试2401", "测试2402"]);
   assert.equal(published.snapshots.length, 2);
   assert.equal((await callTasks(student, "", task)).status, 403);
@@ -200,6 +200,10 @@ try {
   await click(leader, "关闭");
   await student.goto(url);
   await student.getByRole("dialog").waitFor();
+  await studentBrowser.setGeolocation({longitude: 120.169487, latitude: 35.942592, accuracy: 101});
+  await student.getByRole("button", {name: /^是，我在校/}).click();
+  await includes(student.getByRole("dialog"), "定位精度不足或靠近范围边界，请到开阔处重试（或猛猛再点几次，浏览器定位精度问题）");
+  await studentBrowser.setGeolocation({longitude: 120.169487, latitude: 35.942592, accuracy: 19});
   await student.getByRole("button", {name: /^是，我在校/}).click();
   await includes(student.getByRole("dialog"), "在校打卡成功");
   const libraryLocation = "唐岛湾校区 · 图书馆总馆附近";

@@ -13,7 +13,7 @@ async function loadDefaultFence() {
     if (!response.ok) return null;
     const feature = await response.json();
     return validateFence({name: tangdaowan, version: feature.properties.version,
-      buffer: 20, maxAccuracy: 70, geometry: feature});
+      buffer: 30, maxAccuracy: 100, geometry: feature});
   } catch {
     return null;
   }
