@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b2e56">
+  <title>登录 · 晚点名报备 | 计算机学院</title>
+  <link rel="icon" href="./assets/college-mark.webp" type="image/webp">
+  <link rel="stylesheet" href="./assets/site.css">
+  <link rel="stylesheet" href="./assets/login.css">
+  <script type="module" src="./assets/login.mjs"></script>
+</head>
+<body data-role="login">
+  <a class="skip" href="#main">跳到登录表单</a>
+  <header class="masthead">
+    <div class="wrap masthead-inner">
+      <a class="brand" href="./index.html">
+        <img src="./assets/college-mark.webp" width="47" height="47" alt="学院徽标">
+        <span><span class="university">中国石油大学（华东）</span><strong>计算机科学与技术学院</strong></span>
+      </a>
+    </div>
+  </header>
+  <main id="main" class="wrap login-layout">
+    <section class="hero login-hero" aria-labelledby="login-system-name">
+      <picture class="campus-photo">
+        <source media="(max-width: 600px)" srcset="./assets/campus-mobile.webp">
+        <img src="./assets/campus.webp" width="1050" height="640" alt="">
+      </picture>
+      <div class="hero-body">
+        <p class="hero-kicker">计算机学院 · 学生事务</p>
+        <h1 id="login-system-name">晚点名报备系统</h1>
+      </div>
+    </section>
+    <section class="panel login-panel" aria-labelledby="login-title">
+      <h2 id="login-title">账户登录</h2>
+      <p class="login-instruction">学生填写姓名，班级负责人在姓名前加 A。</p>
+      <form id="login-form" method="post">
+        <label class="field">
+          <span>用户名</span>
+          <input id="username" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="80" required>
+        </label>
+        <div class="field">
+          <label for="password">密码</label>
+          <div class="password-row">
+            <input id="password" type="password" autocomplete="current-password" maxlength="128" required>
+            <button id="password-toggle" class="button quiet compact" type="button" aria-controls="password" aria-pressed="false">显示</button>
+          </div>
+        </div>
+        <div class="enrollment">
+          <label class="enrollment-label" for="account-file">首次登录此浏览器</label>
+          <p id="account-help" class="meta">请选择发给你的个人账户文件。以后可直接输入用户名和密码。</p>
+          <input id="account-file" type="file" accept=".json,application/json" aria-describedby="account-help">
+        </div>
+        <p id="login-error" class="form-error" role="alert" hidden></p>
+        <button type="submit" class="button login-button" disabled>登录</button>
+      </form>
+      <noscript><p class="meta">请启用 JavaScript 后登录。</p></noscript>
+    </section>
+  </main>
+  <footer class="footer">
+    <div class="wrap footer-inner"><span>中国石油大学（华东） · 计算机科学与技术学院</span><a href="./student.html?demo=1">查看演示</a></div>
+  </footer>
+</body>
+</html>
