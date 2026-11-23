@@ -1,4 +1,4 @@
-import {displayTime, rate, statuses} from "./model.mjs";
+import {displayTime, rate, statuses} from "./model.mjs?v=2";
 
 export const escape = value => String(value ?? "").replace(/[&<>"']/g, char =>
   ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[char]);

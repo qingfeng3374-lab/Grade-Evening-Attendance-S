@@ -1,4 +1,4 @@
-import {authenticate, roleURL, signedIn} from "./auth.mjs";
+import {authenticate, roleURL, signedIn} from "./auth.mjs?v=2";
 
 const form = document.querySelector("#login-form");
 const username = document.querySelector("#username");

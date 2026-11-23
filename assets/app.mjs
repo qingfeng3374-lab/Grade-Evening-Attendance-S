@@ -1,6 +1,6 @@
-import {archiveTask, archived, blank, csvText, displayTime, need, packet, roleNames, statusOf} from "./model.mjs";
+import {archiveTask, archived, blank, csvText, displayTime, need, packet, roleNames, statusOf} from "./model.mjs?v=2";
 import {openWorkspace, readWorkspace} from "./storage.mjs";
-import {button, escape, form, note, select, submit} from "./ui.mjs";
+import {button, escape, form, note, select, submit} from "./ui.mjs?v=2";
 
 const root = document.querySelector("main");
 const dialog = document.querySelector("#dialog");
@@ -8,7 +8,7 @@ const fileInput = document.querySelector("#files");
 const live = document.querySelector("#live");
 const role = document.body.dataset.role;
 const demo = new URLSearchParams(location.search).get("demo") === "1";
-const routes = {student: "./student.mjs", leader: "./leader.mjs", admin: "./admin.mjs"};
+const routes = {student: "./student.mjs", leader: "./leader.mjs?v=2", admin: "./admin.mjs?v=2"};
 const ui = {};
 let storage;
 let workspace;
@@ -212,7 +212,7 @@ async function init() {
     const {demoState} = await import("./demo.mjs");
     storage = await openWorkspace("demo-" + role, () => demoState(role));
   } else {
-    auth = await import("./auth.mjs");
+    auth = await import("./auth.mjs?v=2");
     session = await auth.signedIn();
     if (!session) {
       location.replace(auth.loginURL(role, location.hash));

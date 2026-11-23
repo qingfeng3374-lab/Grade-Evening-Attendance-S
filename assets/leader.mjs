@@ -1,7 +1,7 @@
 import {archived, classRoster, classRows, cleanException, displayTime, field, importReceipt, importRoster, importTask, need, newId,
-  rate, recordImport, reportRows, resolveReceipt, statusOf, summarize, unpack} from "./model.mjs";
+  rate, recordImport, reportRows, resolveReceipt, statusOf, summarize, unpack} from "./model.mjs?v=2";
 import {area, button, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys, select,
-  distribution, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs";
+  distribution, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=2";
 
 const pageSize = 15;
 const filterItems = [["", "全部状态"], ["missing", "未提交"], ["present", "在校打卡"], ["away", "离校报备"], ["pending", "待核验"]];

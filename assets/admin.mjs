@@ -1,8 +1,8 @@
 import {adminRows, archived, beijingInput, classRoster, cleanTask, displayTime, field, importException, importReport, need, newId, parseCSV, rate,
-  readBeijing, recordImport, statusOf, summarize, unpack} from "./model.mjs";
+  readBeijing, recordImport, statusOf, summarize, unpack} from "./model.mjs?v=2";
 import {campusNames, validateFence} from "./geo.mjs";
 import {area, button, checklist, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys,
-  completionBar, distribution, select, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs";
+  completionBar, distribution, select, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=2";
 
 export function build(ctx) {
   const ui = ctx.ui;

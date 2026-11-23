@@ -19,7 +19,6 @@
 .login-hero .hero-body { padding: 1.6rem 1.9rem; }
 .login-panel { padding: 1.5rem 1.65rem; align-self: center; }
 .login-panel h2 { font-size: 1.45rem; }
-.login-instruction { color: var(--muted); font-size: .875rem; }
 .login-panel form { margin-top: .85rem; }
 .password-row { position: relative; }
 .password-row input { padding-inline-end: 4.4rem !important; }
