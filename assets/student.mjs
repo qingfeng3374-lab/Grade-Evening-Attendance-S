@@ -1,8 +1,8 @@
 import {applyOnlineAttendance, archived, cleanReceipt, displayTime, field, importTask, isSharedTask, need, newId,
-  recordImport, statusOf, unpack, validatePerson} from "./model.mjs?v=8";
+  recordImport, statusOf, unpack, validatePerson} from "./model.mjs?v=9";
 import {judgePosition} from "./geo.mjs";
 import {area, button, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys,
-  select, submit, tag, taskCard, taskOrder} from "./ui.mjs";
+  select, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=9";
 
 export function build(ctx) {
   const ui = ctx.ui;
@@ -72,7 +72,7 @@ export function build(ctx) {
       + '<div class="actions">' + submit("保存学生信息") + '</div>'));
   }
 
-  function openTask(id, message = "", coords = null) {
+  function openTask(id, message = "") {
     const task = getTask(id);
     need(isMyTask(task), "该任务未包含当前班级。");
     selectedTask = id;
@@ -88,16 +88,9 @@ export function build(ctx) {
       const summary = present ? "在校打卡成功" : "离校报备已提交";
       content += note(onlineRecord(id) ? summary + "，负责人和管理员可查看。"
         : ctx.demo ? summary + "（演示）。" : "这条历史填报保存在本机。") + keys(receiptKeys(record));
-      if (coords && present) {
-        content += keys([["本次经纬度", coords.longitude.toFixed(5) + ", " + coords.latitude.toFixed(5)]]);
-      }
     } else if (phase === "active") {
       if (record) content += note("已有本机记录，请重新选择在校或离校并在线提交。");
-      if (message) {
-        content += note(message, true);
-        if (coords) content += keys([["本次经纬度", coords.longitude.toFixed(5) + ", " + coords.latitude.toFixed(5)],
-          ["定位精度", Math.round(coords.accuracy) + " 米"]]);
-      }
+      if (message) content += note(message, true);
       content += '<h3>你现在是否在校？</h3><div class="choice-grid">'
         + '<button type="button" class="choice" data-do="locate"><span class="icon pin" aria-hidden="true"></span><span><strong>是，我在校</strong><small>允许定位后自动校验</small></span></button>'
         + '<button type="button" class="choice" data-do="away"><span class="icon memo" aria-hidden="true"></span><span><strong>否，我不在校</strong><small>填写离校原因</small></span></button></div>';
@@ -107,11 +100,10 @@ export function build(ctx) {
     ctx.show(task.title, content);
   }
 
-  async function submitAttendance(id, fields, coords) {
+  async function submitAttendance(id, fields) {
     if (ctx.online) {
       need(isSharedTask(ctx.state, id), "请联系管理员在线发布此旧版任务后再填报。");
-      const body = coords ? {result: fields.result, longitude: coords.longitude, latitude: coords.latitude, accuracy: coords.accuracy} : fields;
-      const {record} = await ctx.request("/tasks/" + id + "/attendance", {method: "POST", body});
+      const {record} = await ctx.request("/tasks/" + id + "/attendance", {method: "POST", body: fields});
       await ctx.edit(state => applyOnlineAttendance(state, [record]));
       return;
     }
@@ -131,11 +123,13 @@ export function build(ctx) {
     const task = getTask(id);
     const result = judgePosition(task.fences, coords);
     if (result.status === "pass") {
-      await submitAttendance(id, {result: "present", campus: result.campus, accuracy: coords.accuracy}, coords);
-      openTask(id, "", coords);
+      const {longitude, latitude, accuracy} = coords;
+      await submitAttendance(id, ctx.demo ? {result: "present", campus: result.campus, accuracy,
+        location: result.campus + " · 图书馆总馆附近"} : {result: "present", longitude, latitude, accuracy});
+      openTask(id);
     } else openTask(id, result.status === "outside"
       ? "当前位置超出任务允许区域，请核对位置后重新选择。"
-      : "定位精度不足或靠近范围边界，请到开阔处重试。", Number.isFinite(coords?.accuracy) ? coords : null);
+      : "定位精度不足或靠近范围边界，请到开阔处重试。");
   }
 
   async function locate() {
@@ -213,7 +207,7 @@ export function build(ctx) {
         + area("reason", "离校原因", record?.reason, 'required maxlength="500" placeholder="请简要说明离校情况"')
         + '<div class="actions">' + submit("确认报备") + button("返回选择", "task", "secondary", task.id) + '</div>', task.id));
     },
-    "simulate-pass"() { return check(selectedTask, {longitude: 120.169, latitude: 35.938, accuracy: 18}); },
+    "simulate-pass"() { return check(selectedTask, {longitude: 120.169487, latitude: 35.942592, accuracy: 18}); },
     "simulate-outside"() { return check(selectedTask, {longitude: 120.22, latitude: 35.98, accuracy: 18}); },
   }, forms: {
     async profile(data) {

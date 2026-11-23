@@ -104,14 +104,15 @@ export function checklist(name, label, items, checked) {
 export function receiptKeys(record) {
   if (!record) return [];
   return [["填报时间", displayTime(record.submittedAt)], ["填报类型", statuses[record.result][0]],
-    ...(record.result === "present" ? [["判定校区", record.campus], ["定位精度", Math.round(record.accuracy) + " 米"]]
+    ...(record.result === "present" ? [["判定校区", record.campus], ["打卡地点", record.location ?? "原记录仅含校区"],
+      ["定位精度", Math.round(record.accuracy) + " 米"]]
       : [["离校原因", record.reason]])];
 }
 
 export function serializeDetails(rows, title) {
-  return [["任务", "班级", "姓名", "学号", "状态", "填报时间（北京时间）", "判定校区", "定位精度（米）", "离校原因"],
+  return [["任务", "班级", "姓名", "学号", "状态", "填报时间（北京时间）", "判定校区", "打卡地点", "定位精度（米）", "离校原因"],
     ...rows.map(row => [title, row.group, row.name, row.id, statuses[row.status]?.[0] ?? row.status,
-      row.record ? displayTime(row.record.submittedAt) : "", row.record?.campus, row.record?.accuracy,
+      row.record ? displayTime(row.record.submittedAt) : "", row.record?.campus, row.record?.location, row.record?.accuracy,
       row.record?.reason])];
 }
 

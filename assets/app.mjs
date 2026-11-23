@@ -1,6 +1,6 @@
-import {applyOnlineAttendance, applySharedTask, archiveTask, archived, blank, csvText, displayTime, need, packet, roleNames, statusOf} from "./model.mjs?v=8";
+import {applyOnlineAttendance, applySharedTask, archiveTask, archived, blank, csvText, displayTime, need, packet, roleNames, statusOf} from "./model.mjs?v=9";
 import {openWorkspace, readWorkspace} from "./storage.mjs";
-import {button, escape, form, note, select, submit} from "./ui.mjs?v=2";
+import {button, escape, form, note, select, submit} from "./ui.mjs?v=9";
 
 const root = document.querySelector("main");
 const dialog = document.querySelector("#dialog");
@@ -8,7 +8,7 @@ const fileInput = document.querySelector("#files");
 const live = document.querySelector("#live");
 const role = document.body.dataset.role;
 const demo = new URLSearchParams(location.search).get("demo") === "1";
-const routes = {student: "./student.mjs?v=8", leader: "./leader.mjs?v=8", admin: "./admin.mjs?v=8"};
+const routes = {student: "./student.mjs?v=9", leader: "./leader.mjs?v=9", admin: "./admin.mjs?v=9"};
 const ui = {};
 let storage;
 let workspace;
@@ -302,10 +302,15 @@ async function init() {
   draw();
   const footer = document.querySelector(".footer-inner");
   const schoolLink = footer.querySelector("a");
+  const mapCredits = document.createElement("a");
+  mapCredits.href = "https://www.openstreetmap.org/copyright";
+  mapCredits.textContent = "© OpenStreetMap contributors";
+  mapCredits.target = "_blank";
+  mapCredits.rel = "noopener noreferrer";
   const footerLinks = document.createElement("div");
   footerLinks.className = "footer-links";
   footerLinks.innerHTML = button("本机数据", "data-tools", "quiet compact");
-  footerLinks.append(schoolLink);
+  footerLinks.append(schoolLink, mapCredits);
   footer.append(footerLinks);
   screen.start?.();
   refreshTasksInBackground();

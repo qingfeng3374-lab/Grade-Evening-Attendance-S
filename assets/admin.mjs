@@ -1,8 +1,8 @@
 import {adminRows, applySharedTask, archived, beijingInput, classRoster, cleanTask, displayTime, field, importException, importReport,
-  isSharedTask, need, newId, parseCSV, rate, readBeijing, recordImport, statusOf, summarize, unpack} from "./model.mjs?v=8";
+  isSharedTask, need, newId, parseCSV, rate, readBeijing, recordImport, statusOf, summarize, unpack} from "./model.mjs?v=9";
 import {campusNames, validateFence} from "./geo.mjs";
 import {area, button, checklist, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys,
-  completionBar, distribution, select, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=2";
+  completionBar, distribution, select, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=9";
 
 const [tangdaowan, ...customCampuses] = campusNames;
 const boundaryPath = "./assets/tangdaowan-boundary.geojson";

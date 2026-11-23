@@ -193,6 +193,7 @@ export function cleanReceipt(raw) {
     studentId: number, name, group, submittedAt: raw.submittedAt, result: raw.result};
   if (raw.result === "present") {
     value.campus = field(raw.campus, "校区", 40);
+    if (raw.location !== undefined) value.location = field(raw.location, "打卡地点", 160);
     need(Number.isFinite(raw.accuracy) && raw.accuracy > 0 && raw.accuracy <= 1000, "回执定位精度有误。");
     value.accuracy = raw.accuracy;
   } else {
