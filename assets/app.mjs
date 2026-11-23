@@ -1,4 +1,4 @@
-import {applySharedTask, archiveTask, archived, blank, csvText, displayTime, need, packet, roleNames, statusOf} from "./model.mjs?v=5";
+import {applyOnlineAttendance, applySharedTask, archiveTask, archived, blank, csvText, displayTime, need, packet, roleNames, statusOf} from "./model.mjs?v=8";
 import {openWorkspace, readWorkspace} from "./storage.mjs";
 import {button, escape, form, note, select, submit} from "./ui.mjs?v=2";
 
@@ -8,7 +8,7 @@ const fileInput = document.querySelector("#files");
 const live = document.querySelector("#live");
 const role = document.body.dataset.role;
 const demo = new URLSearchParams(location.search).get("demo") === "1";
-const routes = {student: "./student.mjs?v=6", leader: "./leader.mjs?v=5", admin: "./admin.mjs?v=5"};
+const routes = {student: "./student.mjs?v=8", leader: "./leader.mjs?v=8", admin: "./admin.mjs?v=8"};
 const ui = {};
 let storage;
 let workspace;
@@ -19,6 +19,7 @@ let taskPhases;
 let auth;
 let session;
 let taskCursor = 0;
+let attendanceCursor = 0;
 let pendingTaskSync;
 let deferredTaskDraw = false;
 
@@ -131,21 +132,43 @@ async function read(file, json = true) {
   }
 }
 
+const safeFilename = file => file.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-");
+
 function download(file, data, mime) {
   const link = document.createElement("a");
   link.href = URL.createObjectURL(new Blob([data], {type: mime}));
-  link.download = file.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-");
+  link.download = safeFilename(file);
   document.body.append(link);
   link.click();
   setTimeout(() => { URL.revokeObjectURL(link.href); link.remove(); }, 10000);
 }
 
-function json(file, type, data) {
-  download(file + ".json", JSON.stringify(packet(type, data, demo), null, 2), "application/json");
+async function saveExport(file, data, mime) {
+  let handle;
+  if (typeof window.showSaveFilePicker === "function") {
+    try {
+      handle = await window.showSaveFilePicker({suggestedName: safeFilename(file),
+        types: [{accept: {[mime]: [file.slice(file.lastIndexOf("."))]}}]});
+    } catch (error) {
+      if (error.name === "AbortError") return false;
+      if (error.name !== "SecurityError" && error.name !== "NotSupportedError") throw error;
+    }
+  }
+  if (handle) {
+    const writer = await handle.createWritable();
+    await writer.write(new Blob([data], {type: mime}));
+    await writer.close();
+  } else download(file, data, mime);
+  return true;
+}
+
+function json(file, type, data, chooseLocation = false) {
+  const contents = JSON.stringify(packet(type, data, demo), null, 2);
+  return (chooseLocation ? saveExport : download)(file + ".json", contents, "application/json");
 }
 
 function csv(file, rows) {
-  download(file + ".csv", csvText(rows), "text/csv;charset=utf-8");
+  return saveExport(file + ".csv", csvText(rows), "text/csv");
 }
 
 async function shareText(text, source) {
@@ -180,9 +203,12 @@ const ctx = {
 function syncTasks() {
   if (demo) return Promise.resolve();
   return pendingTaskSync ??= (async () => {
-    const {items, cursor} = await ctx.request("/tasks?since=" + taskCursor);
-    if (items.length) {
-      await edit(state => { for (const item of items) applySharedTask(state, item); }, {redraw: false});
+    const {items, cursor, attendance} = await ctx.request("/tasks?since=" + taskCursor + "&attendanceSince=" + attendanceCursor);
+    if (items.length || attendance?.items.length) {
+      await edit(state => {
+        for (const item of items) applySharedTask(state, item);
+        if (attendance?.items.length) applyOnlineAttendance(state, attendance.items);
+      }, {redraw: false});
       if (dialog.open) deferredTaskDraw = true;
       else {
         draw();
@@ -190,6 +216,7 @@ function syncTasks() {
       }
     }
     taskCursor = cursor;
+    attendanceCursor = attendance?.cursor ?? attendanceCursor;
   })().finally(() => { pendingTaskSync = null; });
 }
 

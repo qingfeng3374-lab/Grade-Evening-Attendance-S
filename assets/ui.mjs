@@ -103,7 +103,7 @@ export function checklist(name, label, items, checked) {
 
 export function receiptKeys(record) {
   if (!record) return [];
-  return [["填报时间", displayTime(record.submittedAt)], ["回执类型", statuses[record.result][0]],
+  return [["填报时间", displayTime(record.submittedAt)], ["填报类型", statuses[record.result][0]],
     ...(record.result === "present" ? [["判定校区", record.campus], ["定位精度", Math.round(record.accuracy) + " 米"]]
       : [["离校原因", record.reason]])];
 }

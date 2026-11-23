@@ -1,4 +1,5 @@
-import {archived, cleanReceipt, displayTime, field, importTask, isSharedTask, need, newId, recordImport, statusOf, unpack, validatePerson} from "./model.mjs?v=5";
+import {applyOnlineAttendance, archived, cleanReceipt, displayTime, field, importTask, isSharedTask, need, newId,
+  recordImport, statusOf, unpack, validatePerson} from "./model.mjs?v=8";
 import {judgePosition} from "./geo.mjs";
 import {area, button, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys,
   select, submit, tag, taskCard, taskOrder} from "./ui.mjs";
@@ -15,17 +16,19 @@ export function build(ctx) {
 
   const getTask = id => need(ctx.state.tasks.find(task => task.id === id), "当前任务不可用。");
   const taskControl = () => ctx.online ? button("刷新任务", "refresh-tasks", "light") : button("导入任务", "import", "light");
-  const current = task => ctx.state.receipts.find(item => item.record.taskId === task.id
+  const onlineRecord = id => ctx.state.onlineAttendance?.find(record => record.taskId === id);
+  const current = task => onlineRecord(task.id) ?? ctx.state.receipts.find(item => item.record.taskId === task.id
     && item.record.studentId === ctx.state.profile?.id)?.record;
   const groups = () => [...new Set(ctx.state.tasks.flatMap(task => task.groups))];
   const isMyTask = task => ctx.state.profile && task.groups.includes(ctx.state.profile.group);
-  const available = task => isMyTask(task) && statusOf(task) === "active" && !current(task);
+  const available = task => isMyTask(task) && statusOf(task) === "active" && (!current(task)
+    || (ctx.online && isSharedTask(ctx.state, task.id) && !onlineRecord(task.id)));
 
   function render() {
     const profile = ctx.state.profile;
     const list = taskOrder(ctx.state.tasks.filter(isMyTask).map(task => ({...task, current: statusOf(task)})));
     const remaining = list.filter(available);
-    const history = list.filter(task => current(task) || ["ended", "revoked"].includes(task.current));
+    const history = list.filter(task => !available(task) && (current(task) || ["ended", "revoked"].includes(task.current)));
     const upcoming = list.filter(task => task.current === "waiting");
     const reminder = list.find(task => task.id === ui.reminder);
     const alerts = ui.reminder ? (reminder
@@ -43,14 +46,15 @@ export function build(ctx) {
         taskCard(task, "waiting", button("详情", "task", "secondary", task.id), false, "开放 " + displayTime(task.opens))).join("") + '</div>') : "")
       + (history.length ? panel("历史任务", '<div class="task-list">' + history.map(task =>
         taskCard(task, current(task)?.result ?? task.current, button("查看", "task", "secondary", task.id), false,
-          task.current === "revoked" ? "任务已撤销" : current(task) ? "回执保存在本机" : "")).join("") + '</div>') : "");
+          task.current === "revoked" ? "任务已撤销" : onlineRecord(task.id) ? "已在线提交"
+            : current(task) ? "记录保存在本机" : "")).join("") + '</div>') : "");
     const sidebar = panel("学生信息", profile
       ? '<p class="student-info">' + escape(profile.name) + '</p><p class="meta">' + escape(profile.group)
         + ' · ' + escape(profile.id) + '</p>' + (ctx.demo ? '<div class="actions">' + button("编辑信息", "profile", "secondary") + '</div>'
-          : '<p class="tiny">打卡回执会自动使用以上学籍信息。</p>')
+          : '<p class="tiny">填报会自动使用以上学籍信息。</p>')
       : '<p class="meta">请使用学籍表中的班级和学号。</p><div class="actions">' + button("填写信息", "profile", "secondary") + '</div>')
       + panel("如何提交", '<ol class="side-rule"><li>' + (ctx.online ? "打开本班发布的任务。" : "导入班群发来的任务包。")
-        + '</li><li>在截止前完成在校打卡或离校报备。</li><li>下载回执，私发给本班负责人。</li></ol>', "", "soft");
+      + '</li><li>在校时按提示允许定位，离校时填写原因。</li><li>提交后可在任务详情查看填报结果。</li></ol>', "", "soft");
     return hero("晚点名打卡", remaining.length ? "有 " + remaining.length + " 项任务待填写。"
       : "在校定位打卡，离校填写报备。", taskControl(), true) + layout(main, sidebar);
   }
@@ -79,12 +83,16 @@ export function build(ctx) {
     if (task.description) content += '<p class="task-description">' + escape(task.description) + '</p>';
     if (archived(ctx.state, id)) {
       content += note("已清理此任务的本机报备数据。");
-    } else if (record) {
-      content += note(record.result === "present" ? "在校打卡成功，请下载回执并私发给本班负责人。"
-        : "离校报备已保存，请下载回执并私发给本班负责人。") + keys(receiptKeys(record));
-      if (coords) content += keys([["本次经纬度", coords.longitude.toFixed(5) + ", " + coords.latitude.toFixed(5)]]);
-      content += '<div class="actions">' + button("下载回执", "receipt", "", task.id) + '</div>';
+    } else if (record && !available(task)) {
+      const present = record.result === "present";
+      const summary = present ? "在校打卡成功" : "离校报备已提交";
+      content += note(onlineRecord(id) ? summary + "，负责人和管理员可查看。"
+        : ctx.demo ? summary + "（演示）。" : "这条历史填报保存在本机。") + keys(receiptKeys(record));
+      if (coords && present) {
+        content += keys([["本次经纬度", coords.longitude.toFixed(5) + ", " + coords.latitude.toFixed(5)]]);
+      }
     } else if (phase === "active") {
+      if (record) content += note("已有本机记录，请重新选择在校或离校并在线提交。");
       if (message) {
         content += note(message, true);
         if (coords) content += keys([["本次经纬度", coords.longitude.toFixed(5) + ", " + coords.latitude.toFixed(5)],
@@ -99,13 +107,20 @@ export function build(ctx) {
     ctx.show(task.title, content);
   }
 
-  async function save(id, fields) {
-    if (ctx.online && isSharedTask(ctx.state, id)) await ctx.syncTasks();
+  async function submitAttendance(id, fields, coords) {
+    if (ctx.online) {
+      need(isSharedTask(ctx.state, id), "请联系管理员在线发布此旧版任务后再填报。");
+      const body = coords ? {result: fields.result, longitude: coords.longitude, latitude: coords.latitude, accuracy: coords.accuracy} : fields;
+      const {record} = await ctx.request("/tasks/" + id + "/attendance", {method: "POST", body});
+      await ctx.edit(state => applyOnlineAttendance(state, [record]));
+      return;
+    }
     await ctx.edit(state => {
       const task = need(state.tasks.find(item => item.id === id), "任务不存在。");
       const p = ctx.account?.person ?? state.profile;
       need(p && task.groups.includes(p.group) && statusOf(task) === "active", "任务已截止或当前班级不适用。");
-      need(!state.receipts.some(item => item.record.taskId === id && item.record.studentId === p.id), "该任务已填报，请下载原回执。");
+      need(!state.receipts.some(item => item.record.taskId === id && item.record.studentId === p.id),
+        "该任务已填报，请查看已有记录。");
       const record = cleanReceipt({id: newId(), taskId: task.id, revision: task.revision, studentId: p.id,
         name: p.name, group: p.group, submittedAt: new Date().toISOString(), ...fields});
       state.receipts.push({record, state: "accepted"});
@@ -116,7 +131,7 @@ export function build(ctx) {
     const task = getTask(id);
     const result = judgePosition(task.fences, coords);
     if (result.status === "pass") {
-      await save(id, {result: "present", campus: result.campus, accuracy: coords.accuracy});
+      await submitAttendance(id, {result: "present", campus: result.campus, accuracy: coords.accuracy}, coords);
       openTask(id, "", coords);
     } else openTask(id, result.status === "outside"
       ? "当前位置超出任务允许区域，请核对位置后重新选择。"
@@ -127,6 +142,7 @@ export function build(ctx) {
     const id = selectedTask;
     const task = getTask(id);
     need(available(task), "此任务当前无法填报。");
+    need(!ctx.online || isSharedTask(ctx.state, id), "请联系管理员在线发布此旧版任务后再填报。");
     if (!navigator.geolocation || !isSecureContext) {
       openTask(id, "定位需要在支持定位的浏览器中使用 HTTPS 网址。");
       return;
@@ -134,7 +150,7 @@ export function build(ctx) {
     // Request location in the click handler so browsers can show their permission prompt.
     const request = new Promise((resolve, reject) =>
       navigator.geolocation.getCurrentPosition(resolve, reject, {enableHighAccuracy: true, maximumAge: 0, timeout: 15000}));
-    ctx.show(task.title, '<div role="status">' + note("正在获取位置。如果浏览器询问是否允许定位，请点「允许」，系统会自动继续打卡。") + '</div>');
+    ctx.show(task.title, note("正在获取位置。如果浏览器询问是否允许定位，请点「允许」，系统会自动继续打卡。"));
     const waiting = ctx.dialog.querySelector(".note");
     try {
       const position = await request;
@@ -190,16 +206,12 @@ export function build(ctx) {
     },
     away() {
       const task = getTask(selectedTask);
+      const record = current(task);
       need(available(task), "此任务当前无法填报。");
+      need(!ctx.online || isSharedTask(ctx.state, task.id), "请联系管理员在线发布此旧版任务后再提交离校报备。");
       ctx.show("离校报备", form("away", '<p class="meta">' + escape(task.title) + '</p>'
-        + area("reason", "离校原因", "", 'required maxlength="500" placeholder="请简要说明离校情况"')
+        + area("reason", "离校原因", record?.reason, 'required maxlength="500" placeholder="请简要说明离校情况"')
         + '<div class="actions">' + submit("确认报备") + button("返回选择", "task", "secondary", task.id) + '</div>', task.id));
-    },
-    receipt(id) {
-      const task = getTask(id);
-      const receipt = need(current(task), "未找到个人回执。");
-      ctx.json("晚点名回执-" + receipt.studentId + "-" + task.title, "receipt", receipt);
-      ctx.toast("请将下载的回执私发给本班负责人。");
     },
     "simulate-pass"() { return check(selectedTask, {longitude: 120.169, latitude: 35.938, accuracy: 18}); },
     "simulate-outside"() { return check(selectedTask, {longitude: 120.22, latitude: 35.98, accuracy: 18}); },
@@ -223,7 +235,8 @@ export function build(ctx) {
       openReminder();
     },
     async away(data, id) {
-      await save(id, {result: "away", reason: field(data.get("reason"), "离校原因", 500)});
+      const reason = field(data.get("reason"), "离校原因", 500);
+      await submitAttendance(id, {result: "away", reason});
       openTask(id);
     },
   }};

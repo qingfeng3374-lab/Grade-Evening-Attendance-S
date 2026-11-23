@@ -31,7 +31,7 @@ export function newId() {
 
 export function blank() {
   return {profile: null, roster: [], staff: [], fences: [], tasks: [], snapshots: [],
-    receipts: [], reports: [], sentReports: [], exceptions: [], archives: [], imports: []};
+    receipts: [], onlineAttendance: [], reports: [], sentReports: [], exceptions: [], archives: [], imports: []};
 }
 
 export function recordImport(state, label, results) {
@@ -49,6 +49,8 @@ export function archiveTask(state, taskId) {
   state.archives = [...(state.archives ?? []), taskId];
   state.snapshots = state.snapshots.filter(item => item.taskId !== taskId);
   state.receipts = state.receipts.filter(item => item.record.taskId !== taskId);
+  state.onlineAttendance = (state.onlineAttendance ?? []).filter(record => record.taskId !== taskId);
+  if (state.onlineAway) state.onlineAway = state.onlineAway.filter(record => record.taskId !== taskId);
   state.reports = state.reports.filter(item => item.report.taskId !== taskId);
   state.sentReports = state.sentReports.filter(item => item.taskId !== taskId);
   state.exceptions = (state.exceptions ?? []).filter(item => item.taskId !== taskId);
@@ -200,6 +202,16 @@ export function cleanReceipt(raw) {
   return value;
 }
 
+export function applyOnlineAttendance(state, incoming) {
+  const records = new Map((state.onlineAttendance ?? state.onlineAway ?? []).map(record => [record.id, record]));
+  for (const raw of incoming) {
+    const record = cleanReceipt(raw);
+    if (!archived(state, record.taskId)) records.set(record.id, record);
+  }
+  state.onlineAttendance = [...records.values()];
+  delete state.onlineAway;
+}
+
 export function importReceipt(state, raw, now = Date.now()) {
   const record = cleanReceipt(raw);
   const task = need(state.tasks.find(item => item.id === record.taskId), "回执对应的任务尚未导入。");
@@ -240,6 +252,8 @@ export function resolveReceipt(state, recordId, accept) {
 
 export function classRows(state, snapshot) {
   if (!snapshot) return [];
+  const online = new Map((state.onlineAttendance ?? []).filter(record =>
+    record.taskId === snapshot.taskId && record.group === snapshot.group).map(record => [record.studentId, record]));
   const entries = new Map();
   for (const item of state.receipts) {
     if (item.record.taskId !== snapshot.taskId || item.record.group !== snapshot.group || item.state === "rejected") continue;
@@ -248,6 +262,8 @@ export function classRows(state, snapshot) {
     entries.set(item.record.studentId, list);
   }
   return snapshot.students.map(person => {
+    const record = online.get(person.id);
+    if (record) return {...person, status: record.result, record, entries: []};
     const list = entries.get(person.id) ?? [];
     const accepted = list.find(item => item.state === "accepted");
     return {...person, status: list.some(item => item.state === "pending") ? "pending" : accepted?.record.result ?? "missing",
@@ -310,10 +326,14 @@ export function importReport(state, raw, now = new Date().toISOString()) {
   return "已更新班级统计";
 }
 
-export function adminRows(snapshot, report) {
+export function adminRows(snapshot, report, online = new Map()) {
   const byId = new Map(report?.rows.map(row => [row.id, row]) ?? []);
-  return snapshot.students.map(person => ({...person, status: byId.get(person.id)?.status ?? "missing",
-    record: byId.get(person.id)?.record ?? null}));
+  return snapshot.students.map(person => {
+    const candidate = online.get(person.id);
+    const record = candidate?.group === snapshot.group ? candidate : null;
+    return {...person, status: record?.result ?? byId.get(person.id)?.status ?? "missing",
+      record: record ?? byId.get(person.id)?.record ?? null};
+  });
 }
 
 export function cleanException(state, raw) {

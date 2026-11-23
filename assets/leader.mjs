@@ -1,5 +1,5 @@
 import {archived, classRoster, classRows, cleanException, displayTime, field, importReceipt, importRoster, importTask, isSharedTask,
-  need, newId, rate, recordImport, reportRows, resolveReceipt, statusOf, summarize, unpack} from "./model.mjs?v=5";
+  need, newId, rate, recordImport, reportRows, resolveReceipt, statusOf, summarize, unpack} from "./model.mjs?v=8";
 import {area, button, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys, select,
   distribution, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=2";
 
@@ -63,15 +63,17 @@ export function build(ctx) {
 
   function render() {
     const {groups, tasks, task, snapshot} = context();
-    const aside = panel("操作指南", '<ol class="side-rule"><li>' + (ctx.online ? "查看自动同步的本班任务并导入学生回执。" : "导入任务、本班名单和学生回执。")
-      + '</li><li>导出班级统计，供年级汇总。</li><li>需要管理员处理时，报送特殊情况。</li></ol>', "", "soft");
+    const aside = panel("操作指南", '<ol class="side-rule"><li>' + (ctx.online ? "在校打卡和离校报备会自动更新。" : "导入任务、本班名单和学生回执。")
+      + '</li><li>可导出本班明细供留存。</li><li>需要管理员处理时，报送特殊情况。</li></ol>', "", "soft");
     const classChoice = groups.length > 1 ? select("group", "当前班级", groups.map(group => [group, group]), ui.group) : "";
     const cards = tasks.length ? '<div class="mobile-task-switch">' + select("task-switch", "切换任务", tasks.map(item => [item.id, item.title]), task.id)
       + '</div><div class="task-list desktop-task-list">' + tasks.map(item => taskCard(item, item.current,
       button(task?.id === item.id ? "当前查看" : "查看进度", "task", "secondary", item.id), task?.id === item.id)).join("") + '</div>' :
       (ctx.online ? empty("暂无班级任务", "管理端发布后，本班任务和应报名单会自动显示。")
         : empty("暂无班级任务", "收到管理端文件后，先导入任务包和本班应报名单。", button("导入文件", "import", "secondary")));
-    return hero("班级负责人端", ui.group ? ui.group + " · 晚点名进度与报送" : "核对本班晚点名进度，提醒学生并汇总报送。", button("导入文件", "import", "light"))
+    return hero("班级负责人端", ui.group ? ui.group + " · 晚点名进度与报送" : "核对本班晚点名进度，提醒学生并汇总报送。",
+      (ctx.online ? button("刷新进度", "refresh-tasks", "light") + button("导入历史文件", "import", "outline-light")
+        : button("导入文件", "import", "light")))
       + layout(panel("本班任务", classChoice + cards, "", "task-switch-panel") + board(task, snapshot), aside);
   }
 
@@ -169,7 +171,7 @@ export function build(ctx) {
     csv() {
       const {task, snapshot} = context();
       need(task && snapshot, "请先导入任务和应报名单。");
-      ctx.csv(task.title + "-" + snapshot.group + "-打卡明细", serializeDetails(classRows(ctx.state, snapshot), task.title));
+      return ctx.csv(task.title + "-" + snapshot.group + "-打卡明细", serializeDetails(classRows(ctx.state, snapshot), task.title));
     },
     async statistics() {
       const {task, snapshot} = context();
@@ -184,8 +186,9 @@ export function build(ctx) {
         state.sentReports = state.sentReports.filter(item => item.taskId !== task.id || item.group !== group.group);
         state.sentReports.push(output);
       });
-      ctx.json("晚点名班级统计-" + snapshot.group + "-v" + output.version, "statistics", output);
-      ctx.toast("班级统计已下载，请发给管理员汇总。");
+      if (await ctx.json("晚点名班级统计-" + snapshot.group + "-v" + output.version, "statistics", output, true)) {
+        ctx.toast("班级统计已导出。");
+      }
     },
     exception() {
       const {task, snapshot} = context();

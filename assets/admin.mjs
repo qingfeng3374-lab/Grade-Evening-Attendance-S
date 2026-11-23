@@ -1,5 +1,5 @@
 import {adminRows, applySharedTask, archived, beijingInput, classRoster, cleanTask, displayTime, field, importException, importReport,
-  isSharedTask, need, newId, parseCSV, rate, readBeijing, recordImport, statusOf, summarize, unpack} from "./model.mjs?v=5";
+  isSharedTask, need, newId, parseCSV, rate, readBeijing, recordImport, statusOf, summarize, unpack} from "./model.mjs?v=8";
 import {campusNames, validateFence} from "./geo.mjs";
 import {area, button, checklist, empty, escape, form, hero, input, keys, layout, note, panel, receiptKeys,
   completionBar, distribution, select, serializeDetails, stats, submit, tag, taskCard, taskOrder} from "./ui.mjs?v=2";
@@ -34,15 +34,20 @@ export async function build(ctx) {
   const customFences = () => ctx.state.fences.filter(item => customCampuses.includes(item.name));
   const availableFences = () => presetFence ? [presetFence, ...customFences()] : customFences();
 
-  function classData(task, state = ctx.state) {
+  function classData(task) {
+    const state = ctx.state;
     const byGroup = new Map(state.reports.filter(item => item.report.taskId === task.id).map(item => [item.report.group, item]));
+    const online = new Map((state.onlineAttendance ?? []).filter(record => record.taskId === task.id)
+      .map(record => [record.studentId, record]));
     return task.groups.map(group => {
       const snapshot = classRoster(state, task.id, group);
       const item = byGroup.get(group);
-      const rows = snapshot ? adminRows(snapshot, item?.report) : [];
+      const rows = snapshot ? adminRows(snapshot, item?.report, online) : [];
       return {group, item, rows, counts: summarize(rows)};
     });
   }
+
+  const visibleClasses = task => classData(task).filter(row => shared(task.id) || row.item);
 
   function renderBoard(task) {
     if (!task) return "";
@@ -54,26 +59,29 @@ export async function build(ctx) {
         + button("删除草稿", "delete", "danger", task.id) + '</div>');
     }
     const classes = classData(task);
-    const seen = classes.filter(item => item.item);
-    const coverage = seen.length === classes.length ? "全年级完成率" : "汇总范围完成率";
-    const total = seen.reduce((sum, row) => sum + row.counts.total, 0);
-    const done = seen.reduce((sum, row) => sum + row.counts.done, 0);
-    const last = seen.map(row => row.item.receivedAt).sort().at(-1);
+    const online = shared(task.id);
+    const seen = classes.filter(row => online || row.item);
+    const totals = summarize(seen.flatMap(row => row.rows));
+    const scope = task.groups.length === groups().length && groups().every(group => task.groups.includes(group))
+      ? "全年级" : "任务范围";
     const status = statusOf(task);
-    const rows = seen.map(row => '<article class="list-row"><div><strong>' + escape(row.group)
-      + '</strong><p class="tiny">应报 ' + row.counts.total + ' · 已完成 ' + row.counts.done + '</p>'
-      + completionBar(row.counts, row.group + "完成报备率") + '</div>'
-      + button("详情", "group-detail", "quiet compact", row.group) + '</article>').join("");
+    const rows = seen.map(({group, counts}) => '<article class="list-row"><div><strong>' + escape(group)
+      + '</strong><p class="tiny">应报 ' + counts.total + ' · 在校 ' + counts.present + ' · 离校 ' + counts.away
+      + ' · 未提交 ' + counts.missing + (counts.pending ? ' · 待核验 ' + counts.pending : '') + '</p>'
+      + '<p class="tiny">完成报备率 ' + rate(counts.done, counts.total) + '</p><p class="tiny">在校打卡率</p>'
+      + completionBar({...counts, done: counts.present}, group + "在校打卡率") + '</div>'
+      + button("详情", "group-detail", "quiet compact", group) + '</article>').join("");
     return panel(task.title, '<div class="actions">' + tag(status) + '<span class="meta">截止 ' + escape(displayTime(task.due)) + '</span></div>'
-      + stats([["已汇总班级", seen.length + "/" + classes.length], ["应报人数", classes.reduce((sum, row) => sum + row.counts.total, 0)],
-        ["已完成报备", done], [coverage, rate(done, total)]])
-      + (seen.length ? distribution(summarize(seen.flatMap(row => row.rows)), "已汇总班级报备分布")
-        + '<p class="meta">最新导入 ' + escape(displayTime(last)) + ' · 北京时间</p>' : '<p class="meta">导入班级统计后显示完成率和分布。</p>')
+      + '<h3>' + (online ? scope + '打卡总览' : '已汇总班级概览') + '</h3>'
+      + stats([["应报人数", totals.total], ["已完成报备", totals.done],
+        ["在校打卡率", rate(totals.present, totals.total)], ["完成报备率", rate(totals.done, totals.total)]])
+      + (seen.length ? distribution(totals, "整体打卡情况") : '<p class="meta">导入历史班级统计后显示完成率和分布。</p>')
       + '<div class="actions">' + (shared(task.id) ? "" : button("下载发布文件", "downloads", "secondary", task.id))
       + (status !== "revoked" ? button("延长截止", "extend", "secondary", task.id)
         + button("撤销任务", "revoke", "danger", task.id) : "") + '</div>'
       + '<div class="actions">' + button("导出年级汇总", "csv-summary", "secondary")
-      + button("导出学生明细", "csv-detail", "secondary") + '</div><div class="rows">' + rows + '</div>');
+      + button("导出学生明细", "csv-detail", "secondary") + '</div>')
+      + (seen.length ? panel("各班打卡进度", '<div class="rows">' + rows + '</div>') : "");
   }
 
   function inboxMessages() {
@@ -127,7 +135,9 @@ export async function build(ctx) {
       item.mode === "draft" ? "" : item.groups.length + " 个班级 · 版本 " + item.revision)).join("") + '</div>'
       : empty("暂无晚点名任务", "新建任务默认使用唐岛湾校区围栏。", button("新建任务", "edit-task", "secondary"));
     return hero("晚点名管理", "发布晚点名任务，查看年级进度与特殊情况。",
-      button("新建任务", "edit-task", "light") + button("导入班级统计", "import", "outline-light") + button("特殊情况邮箱", "all-messages", "outline-light"))
+      button("新建任务", "edit-task", "light") + button("导入历史统计", "import", "outline-light")
+      + button("特殊情况邮箱", "all-messages", "outline-light")
+      + (ctx.online ? button("刷新进度", "refresh-tasks", "outline-light") : ""))
       + layout(panel("点名任务", cards, "", "task-switch-panel") + renderBoard(task), aside);
   }
 
@@ -185,7 +195,7 @@ export async function build(ctx) {
 
   function currentGroup(group) {
     const task = taskFor(ui.task);
-    return need(classData(task).find(item => item.group === group && item.item), "该班还没有统计数据。");
+    return need(visibleClasses(task).find(item => item.group === group), "该班还没有报备数据。");
   }
 
   function classDetail(group, page = 0) {
@@ -193,13 +203,14 @@ export async function build(ctx) {
     const item = currentGroup(group);
     const c = item.counts;
     const maxPage = Math.max(0, Math.ceil(item.rows.length / 15) - 1);
-    const contents = keys([["生成时间", displayTime(item.item.report.createdAt)],
-      ["最近导入", displayTime(item.item.receivedAt)], ["应报 / 已完成", c.total + " / " + c.done],
-      ["在校 / 离校", c.present + " / " + c.away], ["未提交 / 待核验", c.missing + " / " + c.pending]])
+    const contents = stats([["应报", c.total], ["在校打卡", c.present], ["离校报备", c.away], ["未提交", c.missing]])
+      + '<p class="meta">在校打卡率 <strong>' + rate(c.present, c.total)
+      + '</strong> · 完成报备率 ' + rate(c.done, c.total) + '</p>'
+      + distribution(c, "本班报备分布")
       + '<div class="rows">' + item.rows.slice(page * 15, (page + 1) * 15).map(row =>
         '<article class="list-row"><div><strong>' + escape(row.name) + '</strong><p class="tiny">' + escape(row.id)
         + '</p></div><div class="actions">' + tag(row.status)
-        + (row.record ? button("回执", "row-detail", "quiet compact", row.id) : "") + '</div></article>').join("") + '</div>';
+        + (row.record ? button("查看记录", "row-detail", "quiet compact", row.id) : "") + '</div></article>').join("") + '</div>';
     ctx.show(group + " · 统计详情", contents + (maxPage > 0 ? '<div class="actions"><span class="meta">第 ' + (page + 1)
       + ' / ' + (maxPage + 1) + ' 页</span>' + (page > 0 ? button("上一页", "class-page", "secondary", page - 1) : "")
       + (page < maxPage ? button("下一页", "class-page", "secondary", page + 1) : "") + '</div>' : ""));
@@ -316,24 +327,24 @@ export async function build(ctx) {
     "class-page"(page) { classDetail(detailGroup, Number(page)); },
     "row-detail"(id) {
       const {rows} = currentGroup(detailGroup);
-      const row = need(rows.find(item => item.id === id && item.record), "回执不存在。");
-      ctx.show(row.name + " · 回执", keys([["学号", row.id], ["班级", row.group], ...receiptKeys(row.record)])
+      const row = need(rows.find(item => item.id === id && item.record), "填报记录不存在。");
+      ctx.show(row.name + " · 填报记录", keys([["学号", row.id], ["班级", row.group], ...receiptKeys(row.record)])
         + '<div class="actions">' + button("返回本班明细", "group-detail", "secondary", detailGroup) + '</div>');
     },
     "csv-summary"() {
       const task = taskFor(ui.task);
       const classes = classData(task);
-      const data = classes.filter(item => item.item);
+      const data = classes.filter(row => shared(task.id) || row.item);
       const coverage = data.length + "/" + classes.length;
-      ctx.csv(task.title + "-年级汇总", [["任务", "班级", "应报", "在校", "离校", "未提交", "待核验", "完成报备率",
+      return ctx.csv(task.title + "-年级汇总", [["任务", "班级", "应报", "在校", "离校", "未提交", "待核验", "完成报备率",
         "在校打卡率", "导入时间（北京时间）", "班级覆盖率"],
       ...data.map(({group, item, counts: c}) => [task.title, group, c.total, c.present, c.away, c.missing, c.pending,
-        rate(c.done, c.total), rate(c.present, c.total), displayTime(item.receivedAt), coverage])]);
+        rate(c.done, c.total), rate(c.present, c.total), item ? displayTime(item.receivedAt) : "", coverage])]);
     },
     "csv-detail"() {
       const task = taskFor(ui.task);
-      const data = classData(task).filter(item => item.item);
-      ctx.csv(task.title + "-学生明细", serializeDetails(data.flatMap(item => item.rows), task.title));
+      const data = visibleClasses(task);
+      return ctx.csv(task.title + "-学生明细", serializeDetails(data.flatMap(item => item.rows), task.title));
     },
   }, forms: {
     async list() {
